@@ -39,7 +39,8 @@
     "yallist": "^4.0.0"
   },
   "scripts": {
-    "start": "nodemon index",
+    "start": "set NODE_ENV=staging && nodemon index",
+    "production": "set NODE_ENV=production&& nodemon index",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
