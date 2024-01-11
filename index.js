@@ -8,7 +8,7 @@
 
 // dependencies
 const http = require('http');
-const {handleReqRes} = require('./helpers/handleReqRes');
+const { handleReqRes } = require('./helpers/handleReqRes');
 const environment = require('./helpers/environments')
 const data = require('./lib/data')
 
@@ -17,7 +17,7 @@ const app = {};
 
 // testing file system
 // TODO: pore muche dibo
-data.create('test', 'newFile', {name: 'Jonayed Ahmed', language: 'Javascript'}, (err) => {
+data.delete('test', 'newFile', (err) => {
     console.log(err);
 })
 
