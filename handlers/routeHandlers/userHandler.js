@@ -7,7 +7,7 @@
 
 // dependencies
 const data = require('../../lib/data');
-const { hash } = require('../../helpers/utilities');
+const { hash, parseJSON } = require('../../helpers/utilities');
 
 // module scaffolding
 const handler = {};
@@ -48,6 +48,7 @@ handler._users.post = (requestProperties, callback) => {
     if (firstName && lastName && phone && password && tosAgreement) {
         // make sure that the user doesn't already exists
         data.read('users', phone, (err1) => {
+            // error means data does not exists.
             if (err1) {
                 const userObject = {
                     firstName,
@@ -80,7 +81,28 @@ handler._users.post = (requestProperties, callback) => {
 };
 
 handler._users.get = (requestProperties, callback) => {
-    callback(200, { message: 'working fne.' })
+    // check the phone number is valid.
+    const phone = typeof requestProperties.queryStringObject.phone === 'string' && requestProperties.queryStringObject.phone.trim().length === 11
+        ? requestProperties.queryStringObject.phone : false;
+
+    if (phone) {
+        // loop up the user
+        data.read('users', phone, (err, receivedUserData) => {
+            if (!err && receivedUserData) {
+                let user = { ...parseJSON(receivedUserData) };
+                delete user.password;
+                callback(200, user);
+            } else {
+                callback(404, {
+                    error: 'Requested user not found!'
+                });
+            }
+        })
+    } else {
+        callback(404, {
+            error: 'Requested user not found!'
+        });
+    }
 }
 
 handler._users.put = (requestProperties, callback) => {
