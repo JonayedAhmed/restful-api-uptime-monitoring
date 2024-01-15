@@ -1,8 +1,17 @@
+/*
+ * Title: Handle Request Response
+ * Description: Handle Resquest and response
+ * Author: Jonayed Ahmed Riduan
+ * Date: 12/01/2024
+ *
+ */
+
 // dependencies
 const url = require('url');
 const { StringDecoder } = require('string_decoder');
 const routes = require('../routes');
 const { notFoundHandler } = require('../handlers/routeHandlers/notFoundHandler');
+const { parseJSON } = require('../helpers/utilities');
 
 // module saffolding
 const handler = {};
@@ -37,7 +46,9 @@ handler.handleReqRes = (req, res) => {
     });
 
     req.on('end', () => {
+
         realData += decoder.end();
+        requestProperties.body = parseJSON(realData);
 
         chosenHandler(requestProperties, (statusCode, payload) => {
             statusCode = typeof (statusCode) === 'number' ? statusCode : 500;
@@ -46,11 +57,11 @@ handler.handleReqRes = (req, res) => {
             const payloadString = JSON.stringify(payload);
 
             // return the final response
+            res.setHeader('Content-Type', 'application/json');
             res.writeHead(statusCode);
             res.end(payloadString);
         });
-        console.log(realData);
-        res.end('Hello World.');
+
     })
 }
 
