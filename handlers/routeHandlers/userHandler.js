@@ -92,8 +92,8 @@ handler._users.get = (requestProperties, callback) => {
         let token = typeof (requestProperties.headersObject.token) === 'string'
             ? requestProperties.headersObject.token : false;
 
-        tokenHandler._token.verify(token, phone, (hasValidTokenId) => {
-            if (hasValidTokenId) {
+        tokenHandler._token.verify(token, phone, (tokenIsValid) => {
+            if (tokenIsValid) {
                 // look up the user
                 data.read('users', phone, (err, receivedUserData) => {
                     if (!err && receivedUserData) {
@@ -141,8 +141,8 @@ handler._users.put = (requestProperties, callback) => {
             let token = typeof (requestProperties.headersObject.token) === 'string'
                 ? requestProperties.headersObject.token : false;
 
-            tokenHandler._token.verify(token, phone, (hasValidTokenId) => {
-                if (hasValidTokenId) {
+            tokenHandler._token.verify(token, phone, (tokenIsValid) => {
+                if (tokenIsValid) {
                     // lookup the user
                     data.read('users', phone, (err, receivedUserData) => {
 
@@ -161,7 +161,7 @@ handler._users.put = (requestProperties, callback) => {
                             // update to database
                             data.update('users', phone, userData, (err1) => {
                                 if (!err1) {
-                                    callback(500, {
+                                    callback(200, {
                                         message: 'User updated successfully.'
                                     });
                                 } else {
@@ -208,8 +208,8 @@ handler._users.delete = (requestProperties, callback) => {
         let token = typeof (requestProperties.headersObject.token) === 'string'
             ? requestProperties.headersObject.token : false;
 
-        tokenHandler._token.verify(token, phone, (hasValidTokenId) => {
-            if (hasValidTokenId) {
+        tokenHandler._token.verify(token, phone, (tokenIsValid) => {
+            if (tokenIsValid) {
                 // lookup the user
                 data.read('users', phone, (err, userData) => {
                     if (!err && userData) {
