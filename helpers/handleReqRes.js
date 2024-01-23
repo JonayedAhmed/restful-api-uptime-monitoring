@@ -13,7 +13,7 @@ const routes = require('../routes');
 const { notFoundHandler } = require('../handlers/routeHandlers/notFoundHandler');
 const { parseJSON } = require('../helpers/utilities');
 
-// module saffolding
+// module scaffolding
 const handler = {};
 
 handler.handleReqRes = (req, res) => {

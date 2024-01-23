@@ -6,8 +6,17 @@
  */
 
 // dependencies
+const mongoose = require('mongoose');
 const data = require('../../lib/data');
 const { hash, parseJSON, createRandomString } = require('../../helpers/utilities');
+const tokenSchema = require('../../schemas/tokenSchema');
+const userSchema = require('../../schemas/userSchema');
+
+// Creating a model based on userSchema and tokenSchema
+// Model for object mapping (ODM)
+const User = new mongoose.model("User", userSchema);
+const Token = new mongoose.model("Token", tokenSchema);
+
 
 // module scaffolding
 const handler = {};
@@ -26,46 +35,53 @@ handler._token = {};
 
 handler._token.post = (requestProperties, callback) => {
 
-    const phone = typeof requestProperties.body.phone === 'string' && requestProperties.body.phone.trim().length === 11
-        ? requestProperties.body.phone : false;
+
+    // Sanity checking
+    const userId = typeof requestProperties.body.userId === 'string' && requestProperties.body.userId.trim().length > 0
+        ? requestProperties.body.userId : false;
 
     const password = typeof requestProperties.body.password === 'string' && requestProperties.body.password.trim().length > 0
         ? requestProperties.body.password : false;
 
-    if (phone && password) {
-        data.read('users', phone, (err1, userData) => {
-            let hashedPassword = hash(password);
-            if (hashedPassword === parseJSON(userData).password) {
 
-                tokenId = createRandomString(20);
-                let expires = Date.now() + 60 * 60 * 1000;
+    if (userId && password) {
 
-                let tokenObject = {
-                    phone,
-                    id: tokenId,
-                    expires
-                };
+        // Lookup the user
+        User.find({ userId: userId }).then(response => {
 
-                // store the token
-                data.create('tokens', tokenId, tokenObject, (err2) => {
-                    if (!err2) {
-                        callback(200, tokenObject);
-                    } else {
-                        callback(500, {
-                            error: 'There was a problem in the server side.',
-                        });
-                    }
+            if (response?.length > 0 && response?.[0]?.password === hash(password)) {
+
+                const tokenObject = {
+                    userId: userId,
+                    tokenId: createRandomString(20),
+                    expires: Date.now() + 60 * 60 * 24 * 1000
+                }
+
+                // Create new token
+                const newToken = new Token(tokenObject);
+                newToken.save().then(() => {
+                    callback(200, {
+                        data: tokenObject?.tokenId,
+                    });
+                }).catch(err => {
+                    callback(500, {
+                        error: 'There was a server side error.',
+                    });
                 })
-
             } else {
-                callback(400, {
-                    error: 'Password is not valid.',
+                callback(404, {
+                    error: 'User id or password is incorrect.',
                 });
             }
+        }).catch(err => {
+
+            callback(500, {
+                error: 'There was a server side error to get user data.',
+            });
         })
     } else {
         callback(400, {
-            error: 'You have a problem in your request.',
+            error: 'Bad Request.',
         });
     }
 };
@@ -75,19 +91,26 @@ handler._token.get = (requestProperties, callback) => {
     const id = typeof requestProperties.queryStringObject.id === 'string' && requestProperties.queryStringObject.id.trim().length === 20
         ? requestProperties.queryStringObject.id : false;
 
-
     if (id) {
+
         // lookup the token
-        data.read('tokens', id, (err, tokenData) => {
-            const token = { ...parseJSON(tokenData) };
-            if (!err && token) {
-                callback(200, token);
+        Token.find({ tokenId: id }).then(response => {
+
+            if (response?.length > 0) {
+                callback(200, {
+                    data: response?.[0],
+                });
             } else {
                 callback(404, {
                     error: 'Requested token was not found.',
                 });
             }
-        });
+        }).catch(err => {
+
+            callback(500, {
+                error: 'There was a server side error.',
+            });
+        })
     } else {
         callback(404, {
             error: 'Requested token was not found.',
@@ -103,28 +126,47 @@ handler._token.put = (requestProperties, callback) => {
         ? true : false;
 
     if (id && extend) {
-        data.read('tokens', id, (err1, tokenData) => {
-            let tokenObject = parseJSON(tokenData);
-            if (tokenObject.expires > Date.now()) {
 
-                tokenObject.expires = Date.now() + 60 * 60 * 1000;
+        // lookup the token
+        Token.find({ tokenId: id }).then(response => {
 
-                // store the updated token
-                data.update('tokens', id, tokenObject, (err2) => {
-                    if (!err2) {
-                        callback(200);
-                    } else {
+            if (response?.length > 0) {
+                let tokenObject = response?.[0]
+
+                if (tokenObject.expires > Date.now()) {
+
+                    tokenObject.expires = Date.now() + 60 * 60 * 24 * 1000;
+
+                    // store the updated token
+                    Token.updateOne({ tokenId: id }, {
+                        $set: { ...tokenObject }
+                    }).then(() => {
+                        callback(200, {
+                            data: 'Token Updated.',
+                        });
+                    }).catch(err => {
                         callback(500, {
                             error: 'There was a server side error.',
                         });
-                    }
-                });
+                    })
+
+                } else {
+                    callback(400, {
+                        error: 'Token already expired.',
+                    });
+                }
             } else {
-                callback(400, {
-                    error: 'Token already expired.',
+                callback(404, {
+                    error: 'Requested token was not found.',
                 });
             }
-        });
+        }).catch(err => {
+
+            callback(500, {
+                error: 'There was a server side error.',
+            });
+        })
+
     } else {
         callback(400, {
             error: 'There was a problem in your request.',
@@ -137,24 +179,15 @@ handler._token.delete = (requestProperties, callback) => {
         ? requestProperties.queryStringObject.id : false;
 
     if (id) {
-        data.read('tokens', id, (err, tokenData) => {
-            if (!err && tokenData) {
-                data.delete('tokens', id, (err1) => {
-                    if (!err1) {
-                        callback(200, {
-                            message: 'Token successfully deleted.'
-                        })
-                    } else {
-                        callback(500, {
-                            error: 'There was a server side error.'
-                        });
-                    }
-                })
-            } else {
-                callback(500, {
-                    error: 'There was a server side error.'
-                });
-            }
+
+        Token.deleteOne({ tokenId: id }).then(() => {
+            callback(200, {
+                data: 'Token Deleted.',
+            });
+        }).catch(err => {
+            callback(500, {
+                error: 'There was a server side error.',
+            });
         })
     } else {
         callback(400, {
@@ -164,18 +197,29 @@ handler._token.delete = (requestProperties, callback) => {
 }
 
 // This is a general purpose function, not called from API
-handler._token.verify = (id, phone, callback) => {
-    data.read('tokens', id, (err, tokenData) => {
-        if (!err && tokenData) {
-            if (parseJSON(tokenData).phone === phone && parseJSON(tokenData).expires > Date.now()) {
+handler._token.verify = (id, userId, callback) => {
+
+    Token.find({ tokenId: id }).then(response => {
+
+        if (response?.length > 0) {
+
+            if (response?.[0]?.userId === userId && response?.[0]?.expires > Date.now()) {
                 callback(true);
             } else {
                 callback(false);
             }
+
         } else {
-            callback(false);
+            callback(404, {
+                error: 'Requested token was not found.',
+            });
         }
-    });
+    }).catch(err => {
+
+        callback(500, {
+            error: 'There was a server side error.',
+        });
+    })
 }
 
 module.exports = handler;
