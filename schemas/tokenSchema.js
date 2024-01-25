@@ -5,7 +5,7 @@ const tokenSchema = mongoose.Schema({
         type: String,
         required: true
     },
-    tokenId: {
+    token: {
         type: String,
         required: true
     },

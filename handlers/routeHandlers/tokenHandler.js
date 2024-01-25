@@ -53,7 +53,7 @@ handler._token.post = (requestProperties, callback) => {
 
                 const tokenObject = {
                     userId: userId,
-                    tokenId: createRandomString(20),
+                    token: createRandomString(20),
                     expires: Date.now() + 60 * 60 * 24 * 1000
                 }
 
@@ -61,7 +61,7 @@ handler._token.post = (requestProperties, callback) => {
                 const newToken = new Token(tokenObject);
                 newToken.save().then(() => {
                     callback(200, {
-                        data: tokenObject?.tokenId,
+                        data: { ...tokenObject },
                     });
                 }).catch(err => {
                     callback(500, {
@@ -94,7 +94,7 @@ handler._token.get = (requestProperties, callback) => {
     if (id) {
 
         // lookup the token
-        Token.find({ tokenId: id }).then(response => {
+        Token.find({ token: id }).then(response => {
 
             if (response?.length > 0) {
                 callback(200, {
@@ -128,7 +128,7 @@ handler._token.put = (requestProperties, callback) => {
     if (id && extend) {
 
         // lookup the token
-        Token.find({ tokenId: id }).then(response => {
+        Token.find({ token: id }).then(response => {
 
             if (response?.length > 0) {
                 let tokenObject = response?.[0]
@@ -138,7 +138,7 @@ handler._token.put = (requestProperties, callback) => {
                     tokenObject.expires = Date.now() + 60 * 60 * 24 * 1000;
 
                     // store the updated token
-                    Token.updateOne({ tokenId: id }, {
+                    Token.updateOne({ token: id }, {
                         $set: { ...tokenObject }
                     }).then(() => {
                         callback(200, {
@@ -180,7 +180,7 @@ handler._token.delete = (requestProperties, callback) => {
 
     if (id) {
 
-        Token.deleteOne({ tokenId: id }).then(() => {
+        Token.deleteOne({ token: id }).then(() => {
             callback(200, {
                 data: 'Token Deleted.',
             });
@@ -199,7 +199,7 @@ handler._token.delete = (requestProperties, callback) => {
 // This is a general purpose function, not called from API
 handler._token.verify = (id, userId, callback) => {
 
-    Token.find({ tokenId: id }).then(response => {
+    Token.find({ token: id }).then(response => {
 
         if (response?.length > 0) {
 

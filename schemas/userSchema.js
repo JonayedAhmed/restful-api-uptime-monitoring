@@ -26,6 +26,7 @@ const userSchema = mongoose.Schema({
         type: Boolean,
         required: true
     },
+    checks: Array
 });
 
 module.exports = userSchema;
