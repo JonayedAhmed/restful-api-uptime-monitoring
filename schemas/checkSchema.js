@@ -1,6 +1,10 @@
 const mongoose = require('mongoose');
 
 const checkSchema = mongoose.Schema({
+    userId: {
+        type: String,
+        required: true,
+    },
     protocol: {
         type: String,
         required: true,
@@ -20,7 +24,13 @@ const checkSchema = mongoose.Schema({
     },
     timeoutSeconds: {
         type: Number,
-        required: true
+        required: true,
+        validate: {
+            validator: function (value) {
+                return value >= 1 && value <= 10;
+            },
+            message: 'Timeout seconds must be between 1 and 10.'
+        }
     }
 });
 
