@@ -31,7 +31,9 @@ const checkSchema = mongoose.Schema({
             },
             message: 'Timeout seconds must be between 1 and 10.'
         }
-    }
+    },
+    lastChecked: Number,
+    state: String
 });
 
 module.exports = checkSchema;
