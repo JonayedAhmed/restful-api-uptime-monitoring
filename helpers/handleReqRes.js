@@ -16,7 +16,25 @@ const { parseJSON } = require('../helpers/utilities');
 // module scaffolding
 const handler = {};
 
+// CORS headers middleware
+const setCorsHeaders = (res) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+};
+
+const handlePreflightResponse = (res) => {
+    // return the preflight response
+    res.setHeader('Content-Type', 'application/json');
+    res.writeHead(200);
+    res.end();
+}
+
 handler.handleReqRes = (req, res) => {
+
+    // Set CORS headers for every request
+    setCorsHeaders(res);
+
     // request handling
     // get the url and parse it.
     const parsedUrl = url.parse(req.url, true);
@@ -53,17 +71,21 @@ handler.handleReqRes = (req, res) => {
         realData += decoder.end();
         requestProperties.body = parseJSON(realData);
 
-        chosenHandler(requestProperties, (statusCode, payload) => {
-            statusCode = typeof (statusCode) === 'number' ? statusCode : 500;
-            payload = typeof (payload) === 'object' ? payload : {};
+        if (requestProperties?.method === 'options') {
+            handlePreflightResponse(res);
+        } else {
+            chosenHandler(requestProperties, (statusCode, payload) => {
+                statusCode = typeof (statusCode) === 'number' ? statusCode : 500;
+                payload = typeof (payload) === 'object' ? payload : {};
 
-            const payloadString = JSON.stringify(payload);
+                const payloadString = JSON.stringify(payload);
 
-            // return the final response
-            res.setHeader('Content-Type', 'application/json');
-            res.writeHead(statusCode);
-            res.end(payloadString);
-        });
+                // return the final response
+                res.setHeader('Content-Type', 'application/json');
+                res.writeHead(statusCode);
+                res.end(payloadString);
+            });
+        }
 
     })
 }
