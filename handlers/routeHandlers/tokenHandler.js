@@ -37,53 +37,58 @@ handler._token.post = (requestProperties, callback) => {
 
 
     // Sanity checking
-    const userId = typeof requestProperties.body.userId === 'string' && requestProperties.body.userId.trim().length > 0
-        ? requestProperties.body.userId : false;
+    const userName = typeof requestProperties.body.userName === 'string' && requestProperties.body.userName.trim().length > 0
+        ? requestProperties.body.userName : false;
 
     const password = typeof requestProperties.body.password === 'string' && requestProperties.body.password.trim().length > 0
         ? requestProperties.body.password : false;
 
 
-    if (userId && password) {
-
-        // Lookup the user
-        User.find({ userId: userId }).then(response => {
-
-            if (response?.length > 0 && response?.[0]?.password === hash(password)) {
-
-                const tokenObject = {
-                    userId: userId,
-                    token: createRandomString(20),
-                    expires: Date.now() + 60 * 60 * 24 * 1000
-                }
-
-                // Create new token
-                const newToken = new Token(tokenObject);
-                newToken.save().then(() => {
-                    callback(200, {
-                        data: { ...tokenObject },
-                    });
-                }).catch(err => {
-                    callback(500, {
-                        error: 'There was a server side error.',
-                    });
-                })
-            } else {
-                callback(404, {
-                    error: 'User id or password is incorrect.',
-                });
-            }
-        }).catch(err => {
-
-            callback(500, {
-                error: 'There was a server side error to get user data.',
-            });
-        })
-    } else {
-        callback(400, {
+    if (!userName || !password) {
+        return callback(400, {
             error: 'Bad Request.',
         });
     }
+
+    // Determine whether to search by email or userId based on its format
+    let searchField = 'userId';
+    if (userName.includes('@')) { // Check if it's an email format
+        searchField = 'email';
+    }
+
+    // Lookup the user
+    User.find({ [searchField]: userName }).then(response => {
+
+        if (response?.length > 0 && response?.[0]?.password === hash(password)) {
+
+            const tokenObject = {
+                userId: response?.[0]?.userId,
+                email: response?.[0]?.email,
+                token: createRandomString(20),
+                expires: Date.now() + 60 * 60 * 24 * 1000
+            }
+
+            // Create new token
+            const newToken = new Token(tokenObject);
+            newToken.save().then(() => {
+                callback(200, tokenObject);
+            }).catch(err => {
+                callback(500, {
+                    error: 'There was a server side error.',
+                });
+            })
+        } else {
+            callback(404, {
+                error: 'User not found. Please check your user name and password.',
+            });
+        }
+    }).catch(err => {
+
+        callback(500, {
+            error: 'There was a server side error to get user data.',
+        });
+    })
+
 };
 
 handler._token.get = (requestProperties, callback) => {
