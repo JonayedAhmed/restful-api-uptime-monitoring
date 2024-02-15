@@ -167,9 +167,7 @@ handler._check.get = async (requestProperties, callback) => {
                         const checks = await Check.find({ _id: { $in: userCheckIds } });
 
                         if (checks && checks.length > 0) {
-                            return callback(200, {
-                                checks: checks,
-                            });
+                            return callback(200, checks);
                         } else {
                             return callback(500, {
                                 error: 'There was a server-side error',
