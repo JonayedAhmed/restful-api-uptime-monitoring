@@ -33,7 +33,12 @@ const checkSchema = mongoose.Schema({
         }
     },
     lastChecked: Number,
-    state: String
+    state: String,
+    isActive: {
+        type: Boolean,
+        required: true,
+        enum: [true, false]
+    }
 });
 
 module.exports = checkSchema;

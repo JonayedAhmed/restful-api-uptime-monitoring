@@ -44,9 +44,6 @@ handler.handleReqRes = (req, res) => {
     const queryStringObject = parsedUrl.query;
     const headersObject = req.headers;
 
-    console.log(`path: ${path}`)
-    console.log(`Trimmed path: ${trimmedPath}`)
-
     const requestProperties = {
         parsedUrl,
         path,

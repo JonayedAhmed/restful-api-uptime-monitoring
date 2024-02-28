@@ -39,7 +39,7 @@ handler._users.post = async (requestProperties, callback) => {
 
         // Prepare document to store in user collection
         const userObject = {
-            userId: `${++count}`,
+            userId: `${1000 + count + 1}`,
             firstName: requestProperties.body.firstName,
             lastName: requestProperties.body.lastName,
             phone: requestProperties.body.phone,
@@ -70,9 +70,7 @@ handler._users.get = (requestProperties, callback) => {
     // { password: 0 } can be replaced by .select({password: 0})
     User.find({ userId: requestProperties.queryStringObject.userId }, { password: 0 }).then(response => {
         // response returns list of users that matches userId
-        callback(200, {
-            data: response?.[0],
-        });
+        callback(200, response?.[0]);
     }).catch(err => {
 
         callback(500, {
@@ -120,16 +118,44 @@ handler._users.get = (requestProperties, callback) => {
 
 handler._users.put = (requestProperties, callback) => {
 
+    console.log(requestProperties);
+
     User.find({ userId: requestProperties.body.userId }).then(response => {
 
-        // response returns list of users that matches userId
-        let userData = { ...response?.[0], ...requestProperties.body }
         if (requestProperties.body.password) {
-            userData.password = hash(requestProperties.body.password)
+            let userGivenCurrentPassword = hash(requestProperties.body.currentPassword);
+            if (userGivenCurrentPassword !== response?.[0]?.password) {
+                return callback(400, {
+                    error: 'Please enter correct current password.',
+                });
+            }
         }
 
+        // response returns list of users that matches userId
+        let updatedUserData = response?.[0]
+
+        if (requestProperties?.body?.firstName) {
+            updatedUserData.firstName = requestProperties?.body?.firstName
+        }
+        if (requestProperties?.body?.lastName) {
+            updatedUserData.lastName = requestProperties?.body?.lastName
+        }
+        if (requestProperties?.body?.email) {
+            updatedUserData.email = requestProperties?.body?.email
+        }
+        if (requestProperties?.body?.phone) {
+            updatedUserData.phone = requestProperties?.body?.phone
+        }
+        if (requestProperties?.body?.phone) {
+            updatedUserData.profilePicture = requestProperties?.body?.profilePicture
+        }
+        if (requestProperties.body.password) {
+            updatedUserData.password = hash(requestProperties.body.password)
+        }
+
+
         User.updateOne({ userId: requestProperties.body.userId }, {
-            $set: { ...requestProperties.body }
+            $set: { ...updatedUserData }
         }).then(() => {
             callback(200, {
                 message: 'User updated successfully.',

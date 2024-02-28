@@ -79,7 +79,7 @@ handler._token.post = (requestProperties, callback) => {
             })
         } else {
             callback(404, {
-                error: 'User not found. Please check your user name and password.',
+                error: 'User name or password is incorrect.',
             });
         }
     }).catch(err => {

@@ -207,7 +207,7 @@ handler._check.put = async (requestProperties, callback) => {
     const method = requestProperties.body.checks[0].method;
     const successCodes = requestProperties.body.checks[0].successCodes;
     const timeoutSeconds = requestProperties.body.checks[0].timeoutSeconds;
-
+    const isActive = requestProperties.body.checks[0].isActive || false;
 
     if (id && (protocol || url || method || successCodes || timeoutSeconds)) {
 
@@ -248,6 +248,7 @@ handler._check.put = async (requestProperties, callback) => {
                 if (timeoutSeconds) {
                     checkObject.timeoutSeconds = timeoutSeconds
                 }
+                checkObject.isActive = isActive;
 
                 Check.updateOne({ _id: id }, {
                     $set: checkObject
