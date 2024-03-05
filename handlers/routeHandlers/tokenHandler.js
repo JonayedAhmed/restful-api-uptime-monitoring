@@ -7,8 +7,7 @@
 
 // dependencies
 const mongoose = require('mongoose');
-const data = require('../../lib/data');
-const { hash, parseJSON, createRandomString } = require('../../helpers/utilities');
+const { hash, createRandomString } = require('../../helpers/utilities');
 const tokenSchema = require('../../schemas/tokenSchema');
 const userSchema = require('../../schemas/userSchema');
 
@@ -33,7 +32,7 @@ handler.tokenHandler = (requestProperties, callback) => {
 
 handler._token = {};
 
-handler._token.post = (requestProperties, callback) => {
+handler._token.post = async (requestProperties, callback) => {
 
 
     // Sanity checking
@@ -57,37 +56,43 @@ handler._token.post = (requestProperties, callback) => {
     }
 
     // Lookup the user
-    User.find({ [searchField]: userName }).then(response => {
+    const userResponse = await User.find({ [searchField]: userName });
 
-        if (response?.length > 0 && response?.[0]?.password === hash(password)) {
+    if (!userResponse || userResponse.length === 0) {
+        return callback(400, { error: 'Invalid username or password.' });
+    }
 
-            const tokenObject = {
-                userId: response?.[0]?.userId,
-                email: response?.[0]?.email,
-                token: createRandomString(20),
-                expires: Date.now() + 60 * 60 * 24 * 1000
-            }
+    if (userResponse?.length > 0 && userResponse?.[0]?.password === hash(password)) {
 
-            // Create new token
-            const newToken = new Token(tokenObject);
-            newToken.save().then(() => {
-                callback(200, tokenObject);
-            }).catch(err => {
-                callback(500, {
-                    error: 'There was a server side error.',
-                });
-            })
-        } else {
-            callback(404, {
-                error: 'User name or password is incorrect.',
-            });
-        }
-    }).catch(err => {
-
-        callback(500, {
-            error: 'There was a server side error to get user data.',
+        // Delete Previous Tokens for this user
+        const userAllTokenDeleteResponse = await Token.deleteMany({
+            userId: userResponse?.[0]?.userId,
+            expires: { $lt: Date.now() }
         });
-    })
+
+        // Create New Token Object
+        const tokenObject = {
+            userId: userResponse?.[0]?.userId,
+            email: userResponse?.[0]?.email,
+            token: createRandomString(20),
+            expires: Date.now() + 60 * 60 * 24 * 1000
+        }
+
+        // Create new token
+        const newToken = new Token(tokenObject);
+        newToken.save().then(() => {
+            callback(200, tokenObject);
+        }).catch(err => {
+            callback(500, {
+                error: 'There was a server side error.',
+            });
+        })
+
+    } else {
+        callback(404, {
+            error: 'User name or password is incorrect.',
+        });
+    }
 
 };
 

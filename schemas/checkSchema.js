@@ -38,7 +38,8 @@ const checkSchema = mongoose.Schema({
         type: Boolean,
         required: true,
         enum: [true, false]
-    }
+    },
+    responseTime: Number
 });
 
 module.exports = checkSchema;

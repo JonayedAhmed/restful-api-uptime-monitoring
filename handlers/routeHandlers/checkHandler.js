@@ -7,7 +7,6 @@
 
 // dependencies
 const mongoose = require('mongoose');
-const data = require('../../lib/data');
 const { hash, parseJSON, createRandomString } = require('../../helpers/utilities');
 const tokenHandler = require('./tokenHandler');
 const { maxChecks } = require('../../helpers/environments');
