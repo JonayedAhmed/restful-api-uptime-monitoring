@@ -207,8 +207,9 @@ handler._check.put = async (requestProperties, callback) => {
     const successCodes = requestProperties.body.checks[0].successCodes;
     const timeoutSeconds = requestProperties.body.checks[0].timeoutSeconds;
     const isActive = requestProperties.body.checks[0].isActive || false;
+    const serviceName = requestProperties.body.checks[0].serviceName;
 
-    if (id && (protocol || url || method || successCodes || timeoutSeconds)) {
+    if (id && (protocol || url || method || successCodes || timeoutSeconds || isActive || serviceName)) {
 
         const checkData = await Check.find({ _id: id });
 
@@ -246,6 +247,9 @@ handler._check.put = async (requestProperties, callback) => {
                 }
                 if (timeoutSeconds) {
                     checkObject.timeoutSeconds = timeoutSeconds
+                }
+                if(serviceName){
+                    checkObject.serviceName = serviceName
                 }
                 checkObject.isActive = isActive;
 

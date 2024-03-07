@@ -39,7 +39,11 @@ const checkSchema = mongoose.Schema({
         required: true,
         enum: [true, false]
     },
-    responseTime: Number
+    responseTime: Number,
+    serviceName: {
+        type: String,
+        required: true
+    }
 });
 
 module.exports = checkSchema;
