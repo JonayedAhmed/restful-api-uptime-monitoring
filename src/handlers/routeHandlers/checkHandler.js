@@ -70,11 +70,15 @@ handler._check.post = async (requestProperties, callback) => {
 
             if (Array.isArray(requestProperties.body.checks) && requestProperties.body.checks?.length > 0) {
 
+                console.log(requestProperties.body)
                 let badRequests = [];
                 let checkList = requestProperties.body.checks.map(check => {
                     // validate inputs
                     let protocol = typeof (check.protocol) === 'string' && ['http', 'https'].includes(check.protocol)
                         ? check.protocol : false;
+
+                    let group = typeof (check.group) === 'string' && check.group.trim().length > 0
+                    ? check.group : false;
 
                     let url = typeof (check.url) === 'string' && check.url.trim().length > 0
                         ? check.url : false;
@@ -89,7 +93,7 @@ handler._check.post = async (requestProperties, callback) => {
                         && check.timeoutSeconds >= 1 && check.timeoutSeconds <= 10
                         ? check.timeoutSeconds : false;
 
-                    if (protocol && url && method && successCodes && timeoutSeconds) {
+                    if (group && protocol && url && method && successCodes && timeoutSeconds) {
                         const checkObject = { ...check, userId };
                         return checkObject;
                     } else {
@@ -98,6 +102,7 @@ handler._check.post = async (requestProperties, callback) => {
                     }
                 })?.filter(check => check !== false);
 
+                
 
                 const checkListResponse = await Check.insertMany(checkList);
 
@@ -168,8 +173,8 @@ handler._check.get = async (requestProperties, callback) => {
                         if (checks && checks.length > 0) {
                             return callback(200, checks);
                         } else {
-                            return callback(500, {
-                                error: 'There was a server-side error',
+                            return callback(404, {
+                                error: `This user don't have existing checks`,
                             });
                         }
                     } catch (err) {
@@ -201,6 +206,7 @@ handler._check.get = async (requestProperties, callback) => {
 handler._check.put = async (requestProperties, callback) => {
 
     const id = requestProperties.body.checks[0]._id;
+    const group = requestProperties.body.checks[0].group;
     const protocol = requestProperties.body.checks[0].protocol;
     const url = requestProperties.body.checks[0].url;
     const method = requestProperties.body.checks[0].method;
@@ -209,7 +215,7 @@ handler._check.put = async (requestProperties, callback) => {
     const isActive = requestProperties.body.checks[0].isActive || false;
     const serviceName = requestProperties.body.checks[0].serviceName;
 
-    if (id && (protocol || url || method || successCodes || timeoutSeconds || isActive || serviceName)) {
+    if (id && (protocol || url || method || successCodes || timeoutSeconds || isActive || serviceName || group)) {
 
         const checkData = await Check.find({ _id: id });
 
@@ -233,6 +239,9 @@ handler._check.put = async (requestProperties, callback) => {
         tokenHandler._token.verify(token, checkObject.userId, (tokenIsValid) => {
             if (tokenIsValid) {
                 // Update the check object
+                if(group){
+                    checkObject.group = group
+                }
                 if (protocol) {
                     checkObject.protocol = protocol
                 }

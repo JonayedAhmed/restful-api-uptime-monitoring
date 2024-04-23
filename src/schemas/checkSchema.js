@@ -5,14 +5,18 @@ const checkSchema = mongoose.Schema({
         type: String,
         required: true,
     },
-    protocol: {
+    group: {
         type: String,
-        required: true,
-        enum: ["http", "https"]
+        required: true
     },
     url: {
         type: String,
         required: true
+    },
+    protocol: {
+        type: String,
+        required: true,
+        enum: ["http", "https"]
     },
     method: {
         type: String,
