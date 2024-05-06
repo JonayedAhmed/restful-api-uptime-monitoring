@@ -148,6 +148,9 @@ handler._users.put = (requestProperties, callback) => {
                     if (requestProperties?.body?.email) {
                         updatedUserData.email = requestProperties?.body?.email
                     }
+                    if(requestProperties?.body?.additionalEmails){
+                        updatedUserData.additionalEmails = requestProperties?.body?.additionalEmails
+                    }
                     if (requestProperties?.body?.phone) {
                         updatedUserData.phone = requestProperties?.body?.phone
                     }

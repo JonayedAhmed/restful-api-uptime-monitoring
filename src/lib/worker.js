@@ -168,7 +168,7 @@ worker.validateCheckData = (checkData) => {
 // send notification sms / email to user if state changes
 worker.alertUserToStatusChange = async (newCheckData, state) => {
 
-    const userInfo = await User.find({ userId: newCheckData.userId }, { email: 1 });
+    const userInfo = await User.find({ userId: newCheckData.userId }, { email: 1, additionalEmails: 1 });
 
     if (userInfo && userInfo.length > 0) {
         const userEmail = userInfo?.[0]?.email;
@@ -206,6 +206,11 @@ worker.alertUserToStatusChange = async (newCheckData, state) => {
                     </body>
                 </html>
             `
+        }
+
+        // Keep additional emails in cc if this user have additional emails.
+        if (userInfo?.[0]?.additionalEmails?.length > 0) {
+            mailOptions.cc = userInfo?.[0]?.additionalEmails?.join(',')
         }
 
         // Send email
