@@ -29,8 +29,8 @@ const worker = {};
 const transporter = nodemailer.createTransport({
     service: 'gmail',
     auth: {
-        user: 'jamiulaislam@gmail.com',
-        pass: 'vvqa tunf seca dftf' // Use your app password here
+        user: 'alerts.sys.monitor@gmail.com',
+        pass: 'bqzy sefd mdsm wlgq' // Use your app password here
     }
 });
 
@@ -174,7 +174,7 @@ worker.alertUserToStatusChange = async (newCheckData, state) => {
         const userEmail = userInfo?.[0]?.email;
 
         const mailOptions = {
-            from: 'jamiulaislam@gmail.com',
+            from: 'alerts.sys.monitor@gmail.com',
             to: userEmail,
             subject: 'Service Status Alert',
             html: `
