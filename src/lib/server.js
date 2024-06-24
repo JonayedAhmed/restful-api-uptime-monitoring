@@ -28,7 +28,7 @@ server.connectToDatabase = () => {
 server.createServer = () => {
     const createServerVariable = http.createServer(server.handleReqRes);
     createServerVariable.listen(environment.port, () => {
-        console.log(`[Listening to port ${environment.port}]`);
+        console.log(`[Listening to port ${environment.port}] for ${environment.envName}`);
     });
 }
 
