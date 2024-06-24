@@ -22,7 +22,7 @@ environments.staging = {
 environments.production = {
     port: 3000,
     envName: 'production',
-    secretKey: 'fsdnmlkjoij',
+    secretKey: 'fsdfsdfsd',
     maxChecks: 50
 }
 
