@@ -18,9 +18,9 @@ const server = {};
 
 // Database connection with mongoose
 server.connectToDatabase = () => {
-    mongoose.connect('mongodb+srv://alertssysmonitor:GZWeJ95SSXTlPtf0@cluster0.8cbv9ss.mongodb.net/api-uptime-monitoring')
-    .then(() => console.log('Connected to database.'))
-    .catch((err) => console.log(err))
+    mongoose.connect('mongodb+srv://jonayedahmed99455:kNgWOh0uZbOAvsey@cluster0.v5mb8h1.mongodb.net/api-uptime-monitoring')
+        .then(() => console.log('Connected to database.'))
+        .catch((err) => console.log(err))
 }
 
 

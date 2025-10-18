@@ -13,14 +13,14 @@ const environments = {}
 
 
 environments.staging = {
-    port: 5000,
+    port: Number(process.env.PORT) || 5000,
     envName: 'staging',
     secretKey: 'fsdfsdfsd',
     maxChecks: 50
 }
 
 environments.production = {
-    port: 3000,
+    port: Number(process.env.PORT) || 3000,
     envName: 'production',
     secretKey: 'fsdfsdfsd',
     maxChecks: 50
