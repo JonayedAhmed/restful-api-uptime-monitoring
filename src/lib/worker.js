@@ -14,12 +14,14 @@ const https = require('https');
 const { parseJSON } = require('../helpers/utilities');
 const userSchema = require('../schemas/userSchema');
 const checkSchema = require('../schemas/checkSchema');
+const healthSchema = require('../schemas/healthSchema');
 const nodemailer = require('nodemailer');
 
 // Creating a model based on userSchema
 // Model for object mapping (ODM)
 const User = new mongoose.model("User", userSchema);
 const Check = new mongoose.model("Check", checkSchema);
+const HealthLog = new mongoose.model("HealthLog", healthSchema);
 
 // worker object - module scaffolding
 const worker = {};
@@ -136,6 +138,20 @@ worker.processCheckOutcome = async (checkData, checkOutCome) => {
     Check.updateOne({ _id: newCheckData._id }, {
         $set: newCheckData
     }).then((response) => {
+        // store health log
+        try {
+            const log = new HealthLog({
+                checkId: newCheckData._id,
+                timestamp: new Date(newCheckData.lastChecked),
+                state,
+                responseTime,
+                statusCode: checkOutCome.responseCode || 0,
+                error: checkOutCome.error ? String(checkOutCome.value || 'UNKNOWN') : null,
+                isAlertTriggered: !!alertRequired
+            });
+            log.save().catch(() => { });
+        } catch (_) { }
+
         if (alertRequired) {
             console.log(`Alert is needed as there is state change for ${checkData.url}.`);
             worker.alertUserToStatusChange(newCheckData, state);
