@@ -15,6 +15,7 @@ const { parseJSON } = require('../helpers/utilities');
 const userSchema = require('../schemas/userSchema');
 const checkSchema = require('../schemas/checkSchema');
 const healthSchema = require('../schemas/healthSchema');
+const settingsSchema = require('../schemas/settingsSchema');
 const nodemailer = require('nodemailer');
 
 // Creating a model based on userSchema
@@ -22,6 +23,7 @@ const nodemailer = require('nodemailer');
 const User = new mongoose.model("User", userSchema);
 const Check = new mongoose.model("Check", checkSchema);
 const HealthLog = new mongoose.model("HealthLog", healthSchema);
+const Settings = new mongoose.model("Settings", settingsSchema);
 
 // worker object - module scaffolding
 const worker = {};
@@ -36,6 +38,24 @@ const transporter = nodemailer.createTransport({
     }
 });
 
+
+// ensure TTL index for HealthLog.timestamp according to per-user settings
+worker.ensureTTLIndex = async (userId) => {
+    try {
+        const s = await Settings.findOne({ userId });
+        const ttlHours = s?.ttlHours || 24;
+        const expireAfterSeconds = Math.max(3600, Math.floor(ttlHours * 3600));
+        const indexes = await HealthLog.collection.indexes();
+        const ttlName = 'ttl_timestamp';
+        const hasTTL = indexes.some(ix => ix.name === ttlName);
+        if (hasTTL) {
+            await HealthLog.collection.dropIndex(ttlName).catch(() => { });
+        }
+        await HealthLog.collection.createIndex({ timestamp: 1 }, { expireAfterSeconds, name: ttlName });
+    } catch (e) {
+        console.log('TTL index ensure error:', e?.message || e);
+    }
+}
 
 // perform check
 worker.performCheck = (checkData) => {
@@ -140,6 +160,8 @@ worker.processCheckOutcome = async (checkData, checkOutCome) => {
     }).then((response) => {
         // store health log
         try {
+            // ensure TTL index for current user's preference (best-effort)
+            worker.ensureTTLIndex(newCheckData.userId);
             const log = new HealthLog({
                 checkId: newCheckData._id,
                 timestamp: new Date(newCheckData.lastChecked),
