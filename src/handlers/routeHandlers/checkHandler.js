@@ -121,6 +121,23 @@ handler._check.post = async (requestProperties, callback) => {
                         if (protocol === 'http' || protocol === 'https') {
                             checkObject.method = method;
                             checkObject.successCodes = successCodes || [];
+                            // auth
+                            const authType = typeof check.authType === 'string' && ['none','bearer','apiKey'].includes(check.authType) ? check.authType : 'none';
+                            checkObject.authType = authType;
+                            if (authType === 'bearer' && typeof check.bearerToken === 'string' && check.bearerToken.trim()) {
+                                checkObject.bearerToken = check.bearerToken.trim();
+                            }
+                            if (authType === 'apiKey' && typeof check.apiKeyHeaderName === 'string' && check.apiKeyHeaderName.trim() && typeof check.apiKeyValue === 'string' && check.apiKeyValue.trim()) {
+                                checkObject.apiKeyHeaderName = check.apiKeyHeaderName.trim();
+                                checkObject.apiKeyValue = check.apiKeyValue.trim();
+                            }
+                            if (check.headers && typeof check.headers === 'object' && !Array.isArray(check.headers)) {
+                                checkObject.headers = check.headers;
+                            }
+                            // SSL alerts (https only)
+                            if (protocol === 'https') {
+                                checkObject.sslExpiryAlerts = !!check.sslExpiryAlerts;
+                            }
                         } else if (protocol === 'tcp') {
                             checkObject.port = check.port; // already validated by portOk
                         } else if (protocol === 'dns') {
@@ -273,8 +290,14 @@ handler._check.put = async (requestProperties, callback) => {
     const isActive = requestProperties.body.checks[0].isActive || false;
     const serviceName = requestProperties.body.checks[0].serviceName;
     const tags = requestProperties.body.checks[0].tags;
+    const authType = requestProperties.body.checks[0].authType;
+    const bearerToken = requestProperties.body.checks[0].bearerToken;
+    const apiKeyHeaderName = requestProperties.body.checks[0].apiKeyHeaderName;
+    const apiKeyValue = requestProperties.body.checks[0].apiKeyValue;
+    const headers = requestProperties.body.checks[0].headers;
+    const sslExpiryAlerts = requestProperties.body.checks[0].sslExpiryAlerts;
 
-    if (id && (protocol || url || method || successCodes || timeoutSeconds || isActive || serviceName || group || port || dnsRecordType || expectedDnsValue || tags)) {
+    if (id && (protocol || url || method || successCodes || timeoutSeconds || isActive || serviceName || group || port || dnsRecordType || expectedDnsValue || tags || authType || bearerToken || apiKeyHeaderName || apiKeyValue || headers || sslExpiryAlerts !== undefined)) {
 
         const checkData = await Check.find({ _id: id });
 
@@ -332,6 +355,34 @@ handler._check.put = async (requestProperties, callback) => {
                     checkObject.tags = tags
                         .map(t => typeof t === 'string' ? t.trim() : '')
                         .filter(Boolean);
+                }
+                if (protocol === 'http' || protocol === 'https') {
+                    if (typeof authType === 'string' && ['none','bearer','apiKey'].includes(authType)) {
+                        checkObject.authType = authType;
+                    }
+                    if (typeof bearerToken === 'string') {
+                        checkObject.bearerToken = bearerToken.trim();
+                    }
+                    if (typeof apiKeyHeaderName === 'string') {
+                        checkObject.apiKeyHeaderName = apiKeyHeaderName.trim();
+                    }
+                    if (typeof apiKeyValue === 'string') {
+                        checkObject.apiKeyValue = apiKeyValue.trim();
+                    }
+                    if (headers && typeof headers === 'object' && !Array.isArray(headers)) {
+                        checkObject.headers = headers;
+                    }
+                    if (protocol === 'https' && sslExpiryAlerts !== undefined) {
+                        checkObject.sslExpiryAlerts = !!sslExpiryAlerts;
+                    }
+                } else {
+                    // strip http-only fields for non-HTTP protocols
+                    delete checkObject.authType;
+                    delete checkObject.bearerToken;
+                    delete checkObject.apiKeyHeaderName;
+                    delete checkObject.apiKeyValue;
+                    delete checkObject.headers;
+                    delete checkObject.sslExpiryAlerts;
                 }
                 checkObject.isActive = isActive;
 

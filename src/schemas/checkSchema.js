@@ -26,6 +26,12 @@ const checkSchema = mongoose.Schema({
         type: Array,
         default: []
     },
+    // HTTP auth and headers (http/https only)
+    authType: { type: String, enum: ['none', 'bearer', 'apiKey'], default: 'none' },
+    bearerToken: { type: String },
+    apiKeyHeaderName: { type: String },
+    apiKeyValue: { type: String },
+    headers: { type: Object, default: {} },
     // Optional tags for filtering (e.g., prod, staging, team-x)
     tags: {
         type: [String],
@@ -76,6 +82,12 @@ const checkSchema = mongoose.Schema({
         enum: ['UP', 'DOWN'],
     },
     lastAlertAt: Number
+    ,
+    // SSL certificate expiry alerts (https only)
+    sslExpiryAlerts: { type: Boolean, default: false },
+    sslAlertThresholdsSent: { type: [Number], default: [] }, // days thresholds already alerted
+    sslLastCertExpiryAt: { type: Number }, // millis since epoch
+    sslLastCheckedAt: { type: Number }
 });
 
 module.exports = checkSchema;

@@ -126,13 +126,21 @@ worker.performCheck = async (checkData) => {
 
     if (checkData.protocol === 'http' || checkData.protocol === 'https') {
         // construct the request
+        const headers = Object.assign({}, (checkData.headers && typeof checkData.headers === 'object') ? checkData.headers : {});
+        if (checkData.authType === 'bearer' && typeof checkData.bearerToken === 'string' && checkData.bearerToken) {
+            headers['Authorization'] = `Bearer ${checkData.bearerToken}`;
+        }
+        if (checkData.authType === 'apiKey' && typeof checkData.apiKeyHeaderName === 'string' && checkData.apiKeyHeaderName && typeof checkData.apiKeyValue === 'string') {
+            headers[checkData.apiKeyHeaderName] = checkData.apiKeyValue;
+        }
         const requestDetails = {
             protocol: checkData.protocol + ':',
             hostname: hostname,
             method: (checkData.method || 'GET').toUpperCase(),
             path: path,
             port: parsedPort,
-            timeout: checkData.timeoutSeconds * 1000 //taking it in ms
+            timeout: checkData.timeoutSeconds * 1000, //taking it in ms
+            headers
         }
 
         const protocolToUse = checkData.protocol === 'http' ? http : https;
@@ -168,6 +176,10 @@ worker.performCheck = async (checkData) => {
             checkOutcome = { error: true, value: e };
         }
         worker.processCheckOutcome(checkData, checkOutcome);
+        // SSL expiry alerts (https only)
+        if (checkData.protocol === 'https' && checkData.sslExpiryAlerts) {
+            try { await worker.checkSslExpiry(hostname, checkData); } catch (_) {}
+        }
         return;
     }
 
@@ -458,3 +470,41 @@ worker.init = () => {
 // export 
 worker.metrics = metrics;
 module.exports = worker;
+
+// SSL expiry checker with threshold alerts
+function getDaysUntil(date) {
+    const ms = date.getTime() - Date.now();
+    return Math.floor(ms / (1000 * 60 * 60 * 24));
+}
+
+worker.checkSslExpiry = async (hostname, checkData) => {
+    return new Promise((resolve) => {
+        const tls = require('tls');
+        const socket = tls.connect(443, hostname, { servername: hostname, rejectUnauthorized: false }, async () => {
+            try {
+                const cert = socket.getPeerCertificate();
+                socket.end();
+                if (!cert || !cert.valid_to) return resolve();
+                const expiry = new Date(cert.valid_to);
+                const daysLeft = getDaysUntil(expiry);
+                const thresholds = [30, 14, 7, 3, 1];
+                const sent = Array.isArray(checkData.sslAlertThresholdsSent) ? checkData.sslAlertThresholdsSent : [];
+                const toSend = thresholds.filter(d => daysLeft <= d && !sent.includes(d));
+                if (toSend.length > 0) {
+                    // Send a single alert mentioning the nearest pending threshold
+                    const target = Math.min(...toSend);
+                    try { worker.alertUserToStatusChange({ ...checkData, protocol: 'https', url: hostname }, `SSL expires in ${daysLeft}d (<=${target}d)`); } catch (_) {}
+                    const newSent = [...new Set([...sent, target])];
+                    await Check.updateOne({ _id: checkData._id }, { $set: { sslAlertThresholdsSent: newSent, sslLastCertExpiryAt: expiry.getTime(), sslLastCheckedAt: Date.now() } });
+                } else {
+                    await Check.updateOne({ _id: checkData._id }, { $set: { sslLastCertExpiryAt: expiry.getTime(), sslLastCheckedAt: Date.now() } });
+                }
+            } catch (_) {
+                resolve();
+            }
+            resolve();
+        });
+        socket.on('error', () => resolve());
+        socket.setTimeout(5000, () => { try { socket.destroy(); } catch(_){} resolve(); });
+    });
+};
