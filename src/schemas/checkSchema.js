@@ -83,6 +83,15 @@ const checkSchema = mongoose.Schema({
     },
     lastAlertAt: Number
     ,
+    // Alerts-only snooze: when set, alerts are suppressed until this timestamp (ms since epoch)
+    snoozeUntil: { type: Number },
+    // Track auto-snooze source/time for audit-ability
+    autoSnoozedAt: { type: Number },
+    autoSnoozeReason: { type: String },
+    // Flapping tracking window
+    stateChangeCount: { type: Number, default: 0 },
+    stateChangeWindowStart: { type: Number },
+    lastStateChangedAt: { type: Number },
     // SSL certificate expiry alerts (https only)
     sslExpiryAlerts: { type: Boolean, default: false },
     sslAlertThresholdsSent: { type: [Number], default: [] }, // days thresholds already alerted

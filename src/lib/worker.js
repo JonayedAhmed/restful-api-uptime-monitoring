@@ -30,6 +30,8 @@ const HealthLog = new mongoose.model("HealthLog", healthSchema);
 const Settings = new mongoose.model("Settings", settingsSchema);
 // metrics (in-memory basic counters)
 const metrics = { lastRunAt: 0, errorCount: 0, processed: 0, queueLength: 0, inFlight: 0, concurrency: 5 };
+// per-user cached settings to reduce reads
+const _settingsCache = new Map(); // userId -> { last: number, data: { ttlHours, globalIntervalMinutes, sslThresholdDays } }
 
 // worker object - module scaffolding
 const worker = {};
@@ -85,6 +87,27 @@ worker.ensureTTLIndex = async (userId) => {
         _ttlEnsureCache.set(userId, { last: now, seconds: wantSeconds });
     } catch (e) {
         console.log('TTL index ensure error:', e?.message || e);
+    }
+}
+
+// cache user settings to reduce DB reads when scheduling checks
+const _userSettingsCache = new Map(); // userId -> { last: number, data: object }
+async function getUserSettings(userId) {
+    try {
+        const now = Date.now();
+        const cached = _userSettingsCache.get(userId);
+        const cacheTtlMs = 60 * 1000; // 60s
+        if (cached && (now - cached.last) < cacheTtlMs) return cached.data;
+        const s = await Settings.findOne({ userId });
+        const data = {
+            ttlHours: s?.ttlHours ?? 24,
+            globalIntervalMinutes: s?.globalIntervalMinutes ?? 1,
+            sslThresholdDays: Array.isArray(s?.sslThresholdDays) ? s.sslThresholdDays : [30, 14, 7, 3, 1]
+        };
+        _userSettingsCache.set(userId, { last: now, data });
+        return data;
+    } catch (_) {
+        return { ttlHours: 24, globalIntervalMinutes: 1, sslThresholdDays: [30, 14, 7, 3, 1] };
     }
 }
 
@@ -284,6 +307,7 @@ worker.performCheck = async (checkData) => {
 // save check outcome to database and send to next process
 // processCheckOutcome: persist result, log health, maybe alert on state change
 worker.processCheckOutcome = async (checkData, checkOutcome) => {
+    const now = Date.now();
     // check if check outcome is up or down
     let state = 'DOWN';
     if (checkData.protocol === 'http' || checkData.protocol === 'https') {
@@ -311,10 +335,25 @@ worker.processCheckOutcome = async (checkData, checkOutcome) => {
     // update the check data
     let newCheckData = checkData;
     newCheckData.state = state;
-    newCheckData.lastChecked = Date.now();
+    newCheckData.lastChecked = now;
     newCheckData.responseTime = responseTime;
     newCheckData.failureStreak = failureStreak;
     newCheckData.successStreak = successStreak;
+    // track state change counters for flapping detection
+    if (checkData.state !== state) {
+        const windowMs = 10 * 60 * 1000; // 10 minutes
+        const inWindow = typeof checkData.stateChangeWindowStart === 'number' && (now - checkData.stateChangeWindowStart) <= windowMs;
+        const nextCount = inWindow ? ((Number(checkData.stateChangeCount) || 0) + 1) : 1;
+        newCheckData.stateChangeCount = nextCount;
+        newCheckData.stateChangeWindowStart = inWindow ? checkData.stateChangeWindowStart : now;
+        newCheckData.lastStateChangedAt = now;
+    }
+
+    // respect alerts-only snooze
+    const inSnooze = typeof checkData.snoozeUntil === 'number' && now < checkData.snoozeUntil;
+    if (inSnooze) {
+        alertRequired = false;
+    }
 
 
     Check.updateOne({ _id: newCheckData._id }, {
@@ -336,9 +375,24 @@ worker.processCheckOutcome = async (checkData, checkOutcome) => {
             log.save().catch(() => { });
         } catch (_) { }
 
+        // auto-snooze if flapping
+        try {
+            const flapCount = Number(newCheckData.stateChangeCount) || 0;
+            const windowMs = 10 * 60 * 1000;
+            const flapWindowActive = typeof newCheckData.stateChangeWindowStart === 'number' && (now - newCheckData.stateChangeWindowStart) <= windowMs;
+            const alreadySnoozed = typeof newCheckData.snoozeUntil === 'number' && now < newCheckData.snoozeUntil;
+            if (flapWindowActive && flapCount >= 4 && !alreadySnoozed) {
+                const snoozeMs = 30 * 60 * 1000; // 30 minutes
+                const until = now + snoozeMs;
+                newCheckData.snoozeUntil = until;
+                newCheckData.autoSnoozedAt = now;
+                newCheckData.autoSnoozeReason = 'Auto (flapping)';
+                Check.updateOne({ _id: newCheckData._id }, { $set: { snoozeUntil: until, autoSnoozedAt: now, autoSnoozeReason: 'Auto (flapping)' } }).catch(() => { });
+            }
+        } catch (_) { }
+
         // only trigger email when transitioning INTO DOWN and avoid repeating
         if (alertRequired) {
-            const now = Date.now();
             const alreadyAlertedForDown = newCheckData.lastAlertState === 'DOWN';
             const cooldownMs = 1000 * 60 * 15; // 15 minutes cooldown
             const inCooldown = typeof newCheckData.lastAlertAt === 'number' && (now - newCheckData.lastAlertAt) < cooldownMs;
@@ -463,11 +517,20 @@ worker.gatherAllChecks = async () => {
         } catch (_) { }
         metrics.lastRunAt = Date.now();
         metrics.queueLength = checks.length;
-        checks.forEach(checkData => {
-            // pass the data to the next process.
-            worker.validateCheckData(checkData);
-            metrics.processed++;
-        });
+        let processed = 0;
+        for (const checkData of checks) {
+            try {
+                const s = await getUserSettings(checkData.userId);
+                const intervalMs = Math.max(60_000, Math.floor((s?.globalIntervalMinutes || 1) * 60_000));
+                const last = Number(checkData.lastChecked) || 0;
+                const due = !last || (Date.now() - last) >= intervalMs;
+                if (!due) continue;
+                // pass the data to the next process.
+                worker.validateCheckData(checkData);
+                processed++;
+            } catch (_) { }
+        }
+        metrics.processed += processed;
     } else {
         console.log('Could not find any checks to process.');
     }
@@ -522,7 +585,8 @@ worker.checkSslExpiry = async (hostname, checkData) => {
                 } catch (_) { }
                 const sent = Array.isArray(checkData.sslAlertThresholdsSent) ? checkData.sslAlertThresholdsSent : [];
                 const toSend = thresholds.filter(d => daysLeft <= d && !sent.includes(d));
-                if (toSend.length > 0) {
+                const inSnooze = typeof checkData.snoozeUntil === 'number' && Date.now() < checkData.snoozeUntil;
+                if (toSend.length > 0 && !inSnooze) {
                     // Send a single alert mentioning the nearest pending threshold
                     const target = Math.min(...toSend);
                     try { worker.alertUserToStatusChange({ ...checkData, protocol: 'https', url: hostname }, `SSL Expiry`); } catch (_) { }
