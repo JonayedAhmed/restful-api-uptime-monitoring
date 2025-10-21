@@ -70,30 +70,36 @@ handler._check.post = async (requestProperties, callback) => {
 
             if (Array.isArray(requestProperties.body.checks) && requestProperties.body.checks?.length > 0) {
 
-                console.log(requestProperties.body)
+                // Validate each check and keep only well-formed ones (protocol-specific rules)
                 let badRequests = [];
                 let checkList = requestProperties.body.checks.map(check => {
                     // validate inputs
-                    let protocol = typeof (check.protocol) === 'string' && ['http', 'https'].includes(check.protocol)
+                    let protocol = typeof (check.protocol) === 'string' && ['http', 'https', 'tcp', 'icmp', 'dns'].includes(check.protocol)
                         ? check.protocol : false;
 
                     let group = typeof (check.group) === 'string' && check.group.trim().length > 0
-                    ? check.group : false;
+                        ? check.group : false;
 
                     let url = typeof (check.url) === 'string' && check.url.trim().length > 0
                         ? check.url : false;
 
-                    let method = typeof (check.method) === 'string' && ['GET', 'POST', 'PUT', 'DELETE'].includes(check.method)
-                        ? check.method : false;
+                    // Conditional fields based on protocol
+                    let method = (protocol === 'http' || protocol === 'https')
+                        ? (typeof (check.method) === 'string' && ['GET', 'POST', 'PUT', 'DELETE'].includes(check.method) ? check.method : false)
+                        : true; // not required for other protocols
 
-                    let successCodes = typeof (check.successCodes) === 'object' && Array.isArray(check.successCodes)
-                        ? check.successCodes : false;
+                    let successCodes = (protocol === 'http' || protocol === 'https')
+                        ? (typeof (check.successCodes) === 'object' && Array.isArray(check.successCodes) ? check.successCodes : false)
+                        : (Array.isArray(check.successCodes) ? check.successCodes : []);
+
+                    let portOk = (protocol === 'tcp') ? (typeof check.port === 'number' && check.port >= 1 && check.port <= 65535) : true;
+                    let dnsOk = (protocol === 'dns') ? (typeof check.dnsRecordType === 'string' && ['A', 'AAAA', 'CNAME', 'MX', 'TXT'].includes(check.dnsRecordType)) : true;
 
                     let timeoutSeconds = typeof (check.timeoutSeconds) === 'number' && check.timeoutSeconds % 1 === 0
                         && check.timeoutSeconds >= 1 && check.timeoutSeconds <= 10
                         ? check.timeoutSeconds : false;
 
-                    if (group && protocol && url && method && successCodes && timeoutSeconds) {
+                    if (group && protocol && url && method && successCodes !== false && timeoutSeconds && portOk && dnsOk) {
                         const checkObject = { ...check, userId };
                         return checkObject;
                     } else {
@@ -102,7 +108,7 @@ handler._check.post = async (requestProperties, callback) => {
                     }
                 })?.filter(check => check !== false);
 
-                
+
 
                 const checkListResponse = await Check.insertMany(checkList);
 
@@ -174,7 +180,7 @@ handler._check.get = async (requestProperties, callback) => {
                             return callback(200, checks);
                         } else {
                             return callback(404, {
-                                error: `This user don't have existing checks`,
+                                error: `This user doesn't have existing checks`,
                             });
                         }
                     } catch (err) {
@@ -211,11 +217,14 @@ handler._check.put = async (requestProperties, callback) => {
     const url = requestProperties.body.checks[0].url;
     const method = requestProperties.body.checks[0].method;
     const successCodes = requestProperties.body.checks[0].successCodes;
+    const port = requestProperties.body.checks[0].port;
+    const dnsRecordType = requestProperties.body.checks[0].dnsRecordType;
+    const expectedDnsValue = requestProperties.body.checks[0].expectedDnsValue;
     const timeoutSeconds = requestProperties.body.checks[0].timeoutSeconds;
     const isActive = requestProperties.body.checks[0].isActive || false;
     const serviceName = requestProperties.body.checks[0].serviceName;
 
-    if (id && (protocol || url || method || successCodes || timeoutSeconds || isActive || serviceName || group)) {
+    if (id && (protocol || url || method || successCodes || timeoutSeconds || isActive || serviceName || group || port || dnsRecordType || expectedDnsValue)) {
 
         const checkData = await Check.find({ _id: id });
 
@@ -239,7 +248,7 @@ handler._check.put = async (requestProperties, callback) => {
         tokenHandler._token.verify(token, checkObject.userId, (tokenIsValid) => {
             if (tokenIsValid) {
                 // Update the check object
-                if(group){
+                if (group) {
                     checkObject.group = group
                 }
                 if (protocol) {
@@ -257,7 +266,16 @@ handler._check.put = async (requestProperties, callback) => {
                 if (timeoutSeconds) {
                     checkObject.timeoutSeconds = timeoutSeconds
                 }
-                if(serviceName){
+                if (typeof port === 'number') {
+                    checkObject.port = port
+                }
+                if (dnsRecordType) {
+                    checkObject.dnsRecordType = dnsRecordType
+                }
+                if (expectedDnsValue !== undefined) {
+                    checkObject.expectedDnsValue = expectedDnsValue
+                }
+                if (serviceName) {
                     checkObject.serviceName = serviceName
                 }
                 checkObject.isActive = isActive;

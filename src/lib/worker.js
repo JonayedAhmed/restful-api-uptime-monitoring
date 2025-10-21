@@ -17,6 +17,10 @@ const checkSchema = require('../schemas/checkSchema');
 const healthSchema = require('../schemas/healthSchema');
 const settingsSchema = require('../schemas/settingsSchema');
 const nodemailer = require('nodemailer');
+const net = require('net');
+const dns = require('dns').promises;
+let ping;
+try { ping = require('ping'); } catch (_) { ping = null; }
 
 // Creating a model based on userSchema
 // Model for object mapping (ODM)
@@ -57,11 +61,11 @@ worker.ensureTTLIndex = async (userId) => {
     }
 }
 
-// perform check
-worker.performCheck = (checkData) => {
+// performCheck: dispatch by protocol and emit a normalized outcome
+worker.performCheck = async (checkData) => {
 
     // prepare the initial check outcome
-    let checkOutCome = {
+    let checkOutcome = {
         error: false,
         responseCode: false
     };
@@ -70,79 +74,150 @@ worker.performCheck = (checkData) => {
 
     // parse the hostname and full url from original data
     const parsedUrl = url.parse(checkData.protocol + '://' + checkData.url, true);
-    const hostname = parsedUrl.hostname;
+    const hostname = parsedUrl.hostname || checkData.url; // for non-http, url may be just hostname
     const path = parsedUrl.path;
-    const port = parsedUrl.port;
+    const parsedPort = parsedUrl.port;
 
     // record the start time before sending the request
     const startTime = Date.now();
 
-    // construct the request
-    const requestDetails = {
-        protocol: checkData.protocol + ':',
-        hostname: hostname,
-        method: checkData.method.toUpperCase(),
-        path: path,
-        port: port,
-        timeout: checkData.timeoutSeconds * 1000 //taking it in ms
+    if (checkData.protocol === 'http' || checkData.protocol === 'https') {
+        // construct the request
+        const requestDetails = {
+            protocol: checkData.protocol + ':',
+            hostname: hostname,
+            method: (checkData.method || 'GET').toUpperCase(),
+            path: path,
+            port: parsedPort,
+            timeout: checkData.timeoutSeconds * 1000 //taking it in ms
+        }
+
+        const protocolToUse = checkData.protocol === 'http' ? http : https;
+
+        let req = protocolToUse.request(requestDetails, (res) => {
+            // grab the status of the response 
+            const status = res.statusCode;
+
+            // calculate the response time
+            const responseTime = Date.now() - startTime;
+
+            // update the check outcome and pass to the next process.
+            checkOutcome.responseCode = status;
+            checkOutcome.responseTime = responseTime;
+
+            if (!outcomeSent) {
+                worker.processCheckOutcome(checkData, checkOutcome);
+                outcomeSent = true;
+            }
+        });
+
+        req.on('error', (e) => {
+            checkOutcome = {
+                error: true,
+                value: e
+            };
+
+            // update the check outcome and pass to the next process.
+            if (!outcomeSent) {
+                worker.processCheckOutcome(checkData, checkOutcome);
+                outcomeSent = true;
+            }
+        });
+
+        req.on('timeout', (e) => {
+            checkOutcome = {
+                error: true,
+                value: 'timeout'
+            };
+
+            // update the check outcome and pass to the next process.
+            if (!outcomeSent) {
+                worker.processCheckOutcome(checkData, checkOutcome);
+                outcomeSent = true;
+            }
+        })
+
+        // req send
+        req.end();
+        return;
     }
 
-    const protocolToUse = checkData.protocol === 'http' ? http : https;
-
-    let req = protocolToUse.request(requestDetails, (res) => {
-        // grab the status of the response 
-        const status = res.statusCode;
-
-        // calculate the response time
-        const responseTime = Date.now() - startTime;
-
-        // update the check outcome and pass to the next process.
-        checkOutCome.responseCode = status;
-        checkOutCome.responseTime = responseTime;
-
-        if (!outcomeSent) {
-            worker.processCheckOutcome(checkData, checkOutCome);
-            outcomeSent = true;
-        }
-    });
-
-    req.on('error', (e) => {
-        checkOutCome = {
-            error: true,
-            value: e
+    if (checkData.protocol === 'tcp') {
+        const port = checkData.port || parsedPort || 80;
+        const socket = new net.Socket();
+        let finished = false;
+        const onDone = (err) => {
+            if (finished) return;
+            finished = true;
+            try { socket.destroy(); } catch (_) { }
+            if (err) {
+                checkOutcome = { error: true, value: err.message || String(err) };
+            } else {
+                checkOutcome = { error: false, success: true, responseTime: Date.now() - startTime };
+            }
+            worker.processCheckOutcome(checkData, checkOutcome);
         };
+        socket.setTimeout(checkData.timeoutSeconds * 1000, () => onDone(new Error('timeout')));
+        socket.once('error', onDone);
+        socket.connect(port, hostname, () => onDone());
+        return;
+    }
 
-        // update the check outcome and pass to the next process.
-        if (!outcomeSent) {
-            worker.processCheckOutcome(checkData, checkOutCome);
-            outcomeSent = true;
+    if (checkData.protocol === 'icmp') {
+        if (!ping || !ping.promise || !ping.promise.probe) {
+            checkOutcome = { error: true, value: 'ICMP ping not available (missing dependency)' };
+            worker.processCheckOutcome(checkData, checkOutcome);
+            return;
         }
-    });
-
-    req.on('timeout', (e) => {
-        checkOutCome = {
-            error: true,
-            value: 'timeout'
-        };
-
-        // update the check outcome and pass to the next process.
-        if (!outcomeSent) {
-            worker.processCheckOutcome(checkData, checkOutCome);
-            outcomeSent = true;
+        try {
+            const res = await ping.promise.probe(hostname, { timeout: checkData.timeoutSeconds });
+            const responseTime = res?.time && !isNaN(Number(res.time)) ? Number(res.time) : (Date.now() - startTime);
+            checkOutcome = { error: false, success: !!res.alive, responseTime };
+        } catch (e) {
+            checkOutcome = { error: true, value: e.message || String(e) };
         }
-    })
+        worker.processCheckOutcome(checkData, checkOutcome);
+        return;
+    }
 
-    // req send
-    req.end();
+    if (checkData.protocol === 'dns') {
+        const rrtype = checkData.dnsRecordType || 'A';
+        try {
+            const start = Date.now();
+            const records = await dns.resolve(hostname, rrtype);
+            const responseTime = Date.now() - start;
+            let success = Array.isArray(records) && records.length > 0;
+            if (success && checkData.expectedDnsValue) {
+                const expected = String(checkData.expectedDnsValue).toLowerCase();
+                // Records can be objects (e.g., MX) or strings
+                success = records.some((r) => {
+                    if (typeof r === 'string') return r.toLowerCase() === expected;
+                    if (r && typeof r === 'object') return Object.values(r).some(v => String(v).toLowerCase() === expected);
+                    return false;
+                });
+            }
+            checkOutcome = { error: false, success, responseTime };
+        } catch (e) {
+            checkOutcome = { error: true, value: e.message || String(e) };
+        }
+        worker.processCheckOutcome(checkData, checkOutcome);
+        return;
+    }
 }
 
 // save check outcome to database and send to next process
-worker.processCheckOutcome = async (checkData, checkOutCome) => {
+// processCheckOutcome: persist result, log health, maybe alert on state change
+worker.processCheckOutcome = async (checkData, checkOutcome) => {
     // check if check outcome is up or down
-    let state = !checkOutCome.error && checkOutCome.responseCode && checkData.successCodes.includes(checkOutCome.responseCode)
-        ? 'UP' : 'DOWN';
+    let state = 'DOWN';
+    if (checkData.protocol === 'http' || checkData.protocol === 'https') {
+        state = !checkOutcome.error && checkOutcome.responseCode && checkData.successCodes.includes(checkOutcome.responseCode)
+            ? 'UP' : 'DOWN';
+    } else {
+        state = !checkOutcome.error && !!checkOutcome.success ? 'UP' : 'DOWN';
+    }
 
-    let responseTime = typeof (checkOutCome.responseTime) === 'number' && checkOutCome.responseTime > 0 ? checkOutCome.responseTime : 0
+    let responseTime = typeof (checkOutcome.responseTime) === 'number' && checkOutcome.responseTime > 0 ? checkOutcome.responseTime : 0
 
     // decide we should alert the user or not
     // checkData.lastChecked is required as initial state we considered that as down but first time it may go to up, whether its first time or not is checked by checkData.lastChecked
@@ -167,8 +242,8 @@ worker.processCheckOutcome = async (checkData, checkOutCome) => {
                 timestamp: new Date(newCheckData.lastChecked),
                 state,
                 responseTime,
-                statusCode: checkOutCome.responseCode || 0,
-                error: checkOutCome.error ? String(checkOutCome.value || 'UNKNOWN') : null,
+                statusCode: checkOutcome.responseCode || 0,
+                error: checkOutcome.error ? String(checkOutcome.value || 'UNKNOWN') : null,
                 isAlertTriggered: !!alertRequired
             });
             log.save().catch(() => { });
@@ -199,7 +274,7 @@ worker.validateCheckData = (checkData) => {
         // pass to the next process
         worker.performCheck(checkData);
     } else {
-        console.log('Error: Could not process check as the was not properly formatted.')
+        console.log('Error: Could not process check as the data was not properly formatted.')
     }
 }
 

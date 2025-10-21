@@ -16,15 +16,29 @@ const checkSchema = mongoose.Schema({
     protocol: {
         type: String,
         required: true,
-        enum: ["http", "https"]
+        enum: ["http", "https", "tcp", "icmp", "dns"]
     },
+    // For HTTP/HTTPS only. Not required for tcp/icmp/dns
     method: {
         type: String,
-        required: true
     },
     successCodes: {
         type: Array,
-        required: true
+        default: []
+    },
+    // For TCP checks
+    port: {
+        type: Number,
+        min: 1,
+        max: 65535
+    },
+    // For DNS checks
+    dnsRecordType: {
+        type: String,
+        enum: ["A", "AAAA", "CNAME", "MX", "TXT"],
+    },
+    expectedDnsValue: {
+        type: String,
     },
     timeoutSeconds: {
         type: Number,
