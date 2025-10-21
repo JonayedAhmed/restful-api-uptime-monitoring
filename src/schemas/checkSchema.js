@@ -61,7 +61,13 @@ const checkSchema = mongoose.Schema({
     serviceName: {
         type: String,
         required: true
-    }
+    },
+    // Alert bookkeeping to reduce noise
+    lastAlertState: {
+        type: String,
+        enum: ['UP', 'DOWN'],
+    },
+    lastAlertAt: Number
 });
 
 module.exports = checkSchema;

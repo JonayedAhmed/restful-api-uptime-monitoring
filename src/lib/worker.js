@@ -249,11 +249,26 @@ worker.processCheckOutcome = async (checkData, checkOutcome) => {
             log.save().catch(() => { });
         } catch (_) { }
 
+        // only trigger email when transitioning INTO DOWN and avoid repeating
         if (alertRequired) {
-            console.log(`Alert is needed as there is state change for ${checkData.url}.`);
-            worker.alertUserToStatusChange(newCheckData, state);
-        } else {
-            console.log(`Alert is not needed as there is no state change for ${checkData.url}.`)
+            const now = Date.now();
+            const alreadyAlertedForDown = newCheckData.lastAlertState === 'DOWN';
+            const cooldownMs = 1000 * 60 * 15; // 15 minutes cooldown
+            const inCooldown = typeof newCheckData.lastAlertAt === 'number' && (now - newCheckData.lastAlertAt) < cooldownMs;
+            if (state === 'DOWN' && !alreadyAlertedForDown && !inCooldown) {
+                worker.alertUserToStatusChange(newCheckData, state);
+                // update alert bookkeeping
+                newCheckData.lastAlertState = 'DOWN';
+                newCheckData.lastAlertAt = now;
+                Check.updateOne({ _id: newCheckData._id }, { $set: { lastAlertState: 'DOWN', lastAlertAt: now } }).catch(() => { });
+            }
+            if (state === 'UP' && newCheckData.lastAlertState === 'DOWN') {
+                // Optional: notify recovery once, then reset alert state
+                worker.alertUserToStatusChange(newCheckData, state);
+                newCheckData.lastAlertState = 'UP';
+                newCheckData.lastAlertAt = now;
+                Check.updateOne({ _id: newCheckData._id }, { $set: { lastAlertState: 'UP', lastAlertAt: now } }).catch(() => { });
+            }
         }
     }).catch(err => {
         console.log('Error: failed to update check data state and lastChecked.')
@@ -281,10 +296,15 @@ worker.validateCheckData = (checkData) => {
 // send notification sms / email to user if state changes
 worker.alertUserToStatusChange = async (newCheckData, state) => {
 
-    const userInfo = await User.find({ userId: newCheckData.userId }, { email: 1, additionalEmails: 1 });
+    const userInfo = await User.find(
+        { userId: newCheckData.userId },
+        { email: 1, additionalEmails: 1, firstName: 1, lastName: 1 }
+    );
 
     if (userInfo && userInfo.length > 0) {
         const userEmail = userInfo?.[0]?.email;
+        const firstName = userInfo?.[0]?.firstName || '';
+        const lastName = userInfo?.[0]?.lastName || '';
 
         const mailOptions = {
             from: 'alerts.sys.monitor@gmail.com',
@@ -331,7 +351,10 @@ worker.alertUserToStatusChange = async (newCheckData, state) => {
             if (error) {
                 console.log('Error sending email:', error);
             } else {
-                console.log('Email sent:', info.response);
+                const cc = Array.isArray(userInfo?.[0]?.additionalEmails) && userInfo[0].additionalEmails.length
+                    ? ` (cc: ${userInfo[0].additionalEmails.join(', ')})`
+                    : '';
+                console.log(`Email alert sent to ${firstName} ${lastName} <${userEmail}>${cc} for ${newCheckData.protocol}://${newCheckData.url} state=${state}.`);
             }
         });
     } else {
@@ -346,6 +369,10 @@ worker.gatherAllChecks = async () => {
     const checks = await Check.find({ isActive: true });
 
     if (typeof (checks) === 'object' && Array.isArray(checks) && checks?.length > 0) {
+        // Print a single line indicating when this batch was executed
+        try {
+            console.log(`[Checks] Executed at ${new Date().toISOString()} (count=${checks.length})`);
+        } catch (_) { }
         checks.forEach(checkData => {
             // pass the data to the next process.
             worker.validateCheckData(checkData);
