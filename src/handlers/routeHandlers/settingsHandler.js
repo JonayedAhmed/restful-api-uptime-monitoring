@@ -35,8 +35,8 @@ handler._settings.get = async (requestProperties, callback) => {
             if (!tokenIsValid) return callback(403, { error: 'Authentication failed.' });
 
             const doc = await Settings.findOne({ userId });
-            if (!doc) return callback(200, { userId, ttlHours: 24 });
-            return callback(200, { userId: doc.userId, ttlHours: doc.ttlHours });
+            if (!doc) return callback(200, { userId, ttlHours: 24, sslThresholdDays: [30, 14, 7, 3, 1] });
+            return callback(200, { userId: doc.userId, ttlHours: doc.ttlHours, sslThresholdDays: doc.sslThresholdDays || [30, 14, 7, 3, 1] });
         });
     } catch (e) {
         return callback(500, { error: 'There was a server-side error.' });
@@ -51,6 +51,8 @@ handler._settings.put = async (requestProperties, callback) => {
             ? requestProperties.body.userId : false;
         const ttlHoursRaw = requestProperties.body.ttlHours;
         const ttlHours = Number(ttlHoursRaw);
+        const sslThresholdDaysRaw = requestProperties.body.sslThresholdDays;
+        const sslThresholdDays = Array.isArray(sslThresholdDaysRaw) ? sslThresholdDaysRaw.map(Number).filter(n => Number.isFinite(n) && n > 0) : undefined;
 
         if (!token || !userId || !Number.isFinite(ttlHours) || ttlHours <= 0) {
             return callback(400, { error: 'Invalid or missing parameters.' });
@@ -59,12 +61,14 @@ handler._settings.put = async (requestProperties, callback) => {
         tokenHandler._token.verify(token, userId, async (tokenIsValid) => {
             if (!tokenIsValid) return callback(403, { error: 'Authentication failed.' });
 
+            const update = { ttlHours };
+            if (sslThresholdDays && sslThresholdDays.length) update.sslThresholdDays = sslThresholdDays;
             const updated = await Settings.findOneAndUpdate(
                 { userId },
-                { $set: { ttlHours } },
+                { $set: update },
                 { new: true, upsert: true }
             );
-            return callback(200, { userId: updated.userId, ttlHours: updated.ttlHours });
+            return callback(200, { userId: updated.userId, ttlHours: updated.ttlHours, sslThresholdDays: updated.sslThresholdDays || [30, 14, 7, 3, 1] });
         });
     } catch (e) {
         return callback(500, { error: 'There was a server-side error.' });

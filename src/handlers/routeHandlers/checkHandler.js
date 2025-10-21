@@ -122,7 +122,7 @@ handler._check.post = async (requestProperties, callback) => {
                             checkObject.method = method;
                             checkObject.successCodes = successCodes || [];
                             // auth
-                            const authType = typeof check.authType === 'string' && ['none','bearer','apiKey'].includes(check.authType) ? check.authType : 'none';
+                            const authType = typeof check.authType === 'string' && ['none', 'bearer', 'apiKey'].includes(check.authType) ? check.authType : 'none';
                             checkObject.authType = authType;
                             if (authType === 'bearer' && typeof check.bearerToken === 'string' && check.bearerToken.trim()) {
                                 checkObject.bearerToken = check.bearerToken.trim();
@@ -357,7 +357,7 @@ handler._check.put = async (requestProperties, callback) => {
                         .filter(Boolean);
                 }
                 if (protocol === 'http' || protocol === 'https') {
-                    if (typeof authType === 'string' && ['none','bearer','apiKey'].includes(authType)) {
+                    if (typeof authType === 'string' && ['none', 'bearer', 'apiKey'].includes(authType)) {
                         checkObject.authType = authType;
                     }
                     if (typeof bearerToken === 'string') {

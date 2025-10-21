@@ -46,18 +46,43 @@ const transporter = nodemailer.createTransport({
 
 
 // ensure TTL index for HealthLog.timestamp according to per-user settings
+const _ttlEnsureCache = new Map(); // userId -> { last: number, seconds: number }
 worker.ensureTTLIndex = async (userId) => {
     try {
+        const now = Date.now();
+        const cached = _ttlEnsureCache.get(userId);
+        const throttleMs = 10 * 60 * 1000; // at most once every 10 minutes per user
+
         const s = await Settings.findOne({ userId });
         const ttlHours = s?.ttlHours || 24;
-        const expireAfterSeconds = Math.max(3600, Math.floor(ttlHours * 3600));
-        const indexes = await HealthLog.collection.indexes();
-        const ttlName = 'ttl_timestamp';
-        const hasTTL = indexes.some(ix => ix.name === ttlName);
-        if (hasTTL) {
-            await HealthLog.collection.dropIndex(ttlName).catch(() => { });
+        const wantSeconds = Math.max(3600, Math.floor(ttlHours * 3600));
+
+        if (cached && (now - cached.last) < throttleMs && cached.seconds === wantSeconds) {
+            return; // up-to-date and within throttle
         }
-        await HealthLog.collection.createIndex({ timestamp: 1 }, { expireAfterSeconds, name: ttlName });
+
+        const ttlName = 'ttl_timestamp';
+        const coll = HealthLog.collection;
+        const indexes = await coll.indexes();
+        const existing = indexes.find(ix => ix.name === ttlName);
+
+        if (!existing) {
+            await coll.createIndex({ timestamp: 1 }, { expireAfterSeconds: wantSeconds, name: ttlName });
+        } else {
+            const current = typeof existing.expireAfterSeconds === 'number' ? existing.expireAfterSeconds : undefined;
+            if (current !== wantSeconds) {
+                // Use collMod to update TTL without dropping index (avoids killing queries)
+                try {
+                    const db = mongoose.connection.db;
+                    await db.command({ collMod: coll.collectionName, index: { name: ttlName, expireAfterSeconds: wantSeconds } });
+                } catch (e) {
+                    // If collMod not available, log and keep existing TTL to avoid dropping index mid-query
+                    console.log('TTL collMod failed, keeping existing TTL:', e?.message || e);
+                }
+            }
+        }
+
+        _ttlEnsureCache.set(userId, { last: now, seconds: wantSeconds });
     } catch (e) {
         console.log('TTL index ensure error:', e?.message || e);
     }
@@ -178,7 +203,7 @@ worker.performCheck = async (checkData) => {
         worker.processCheckOutcome(checkData, checkOutcome);
         // SSL expiry alerts (https only)
         if (checkData.protocol === 'https' && checkData.sslExpiryAlerts) {
-            try { await worker.checkSslExpiry(hostname, checkData); } catch (_) {}
+            try { await worker.checkSslExpiry(hostname, checkData); } catch (_) { }
         }
         return;
     }
@@ -297,7 +322,7 @@ worker.processCheckOutcome = async (checkData, checkOutcome) => {
     }).then((response) => {
         // store health log
         try {
-            // ensure TTL index for current user's preference (best-effort)
+            // ensure TTL index for current user's preference (best-effort, throttled)
             worker.ensureTTLIndex(newCheckData.userId);
             const log = new HealthLog({
                 checkId: newCheckData._id,
@@ -487,13 +512,20 @@ worker.checkSslExpiry = async (hostname, checkData) => {
                 if (!cert || !cert.valid_to) return resolve();
                 const expiry = new Date(cert.valid_to);
                 const daysLeft = getDaysUntil(expiry);
-                const thresholds = [30, 14, 7, 3, 1];
+                // Fetch user-configured thresholds from Settings (default: [30,14,7,3,1])
+                let thresholds = [30, 14, 7, 3, 1];
+                try {
+                    const s = await Settings.findOne({ userId: checkData.userId });
+                    if (s && Array.isArray(s.sslThresholdDays) && s.sslThresholdDays.length) {
+                        thresholds = s.sslThresholdDays.filter(n => Number.isFinite(n) && n > 0).sort((a, b) => a - b);
+                    }
+                } catch (_) { }
                 const sent = Array.isArray(checkData.sslAlertThresholdsSent) ? checkData.sslAlertThresholdsSent : [];
                 const toSend = thresholds.filter(d => daysLeft <= d && !sent.includes(d));
                 if (toSend.length > 0) {
                     // Send a single alert mentioning the nearest pending threshold
                     const target = Math.min(...toSend);
-                    try { worker.alertUserToStatusChange({ ...checkData, protocol: 'https', url: hostname }, `SSL expires in ${daysLeft}d (<=${target}d)`); } catch (_) {}
+                    try { worker.alertUserToStatusChange({ ...checkData, protocol: 'https', url: hostname }, `SSL Expiry`); } catch (_) { }
                     const newSent = [...new Set([...sent, target])];
                     await Check.updateOne({ _id: checkData._id }, { $set: { sslAlertThresholdsSent: newSent, sslLastCertExpiryAt: expiry.getTime(), sslLastCheckedAt: Date.now() } });
                 } else {
@@ -505,6 +537,6 @@ worker.checkSslExpiry = async (hostname, checkData) => {
             resolve();
         });
         socket.on('error', () => resolve());
-        socket.setTimeout(5000, () => { try { socket.destroy(); } catch(_){} resolve(); });
+        socket.setTimeout(5000, () => { try { socket.destroy(); } catch (_) { } resolve(); });
     });
 };
