@@ -72,35 +72,62 @@ handler._check.post = async (requestProperties, callback) => {
 
                 // Validate each check and keep only well-formed ones (protocol-specific rules)
                 let badRequests = [];
-                let checkList = requestProperties.body.checks.map(check => {
-                    // validate inputs
-                    let protocol = typeof (check.protocol) === 'string' && ['http', 'https', 'tcp', 'icmp', 'dns'].includes(check.protocol)
+                let checkList = requestProperties.body.checks.map(rawCheck => {
+                    const check = typeof rawCheck === 'object' && rawCheck ? rawCheck : {};
+
+                    // validate common inputs
+                    const protocol = typeof check.protocol === 'string' && ['http', 'https', 'tcp', 'icmp', 'dns'].includes(check.protocol)
                         ? check.protocol : false;
 
-                    let group = typeof (check.group) === 'string' && check.group.trim().length > 0
-                        ? check.group : false;
+                    const group = typeof check.group === 'string' && check.group.trim().length > 0
+                        ? check.group.trim() : false;
 
-                    let url = typeof (check.url) === 'string' && check.url.trim().length > 0
-                        ? check.url : false;
+                    const url = typeof check.url === 'string' && check.url.trim().length > 0
+                        ? check.url.trim() : false;
 
                     // Conditional fields based on protocol
-                    let method = (protocol === 'http' || protocol === 'https')
-                        ? (typeof (check.method) === 'string' && ['GET', 'POST', 'PUT', 'DELETE'].includes(check.method) ? check.method : false)
+                    const method = (protocol === 'http' || protocol === 'https')
+                        ? (typeof check.method === 'string' && ['GET', 'POST', 'PUT', 'DELETE'].includes(check.method) ? check.method : false)
                         : true; // not required for other protocols
 
-                    let successCodes = (protocol === 'http' || protocol === 'https')
-                        ? (typeof (check.successCodes) === 'object' && Array.isArray(check.successCodes) ? check.successCodes : false)
+                    const successCodes = (protocol === 'http' || protocol === 'https')
+                        ? (typeof check.successCodes === 'object' && Array.isArray(check.successCodes) ? check.successCodes : false)
                         : (Array.isArray(check.successCodes) ? check.successCodes : []);
 
-                    let portOk = (protocol === 'tcp') ? (typeof check.port === 'number' && check.port >= 1 && check.port <= 65535) : true;
-                    let dnsOk = (protocol === 'dns') ? (typeof check.dnsRecordType === 'string' && ['A', 'AAAA', 'CNAME', 'MX', 'TXT'].includes(check.dnsRecordType)) : true;
+                    const portOk = (protocol === 'tcp') ? (typeof check.port === 'number' && check.port >= 1 && check.port <= 65535) : true;
+                    const dnsOk = (protocol === 'dns') ? (typeof check.dnsRecordType === 'string' && ['A', 'AAAA', 'CNAME', 'MX', 'TXT'].includes(check.dnsRecordType)) : true;
 
-                    let timeoutSeconds = typeof (check.timeoutSeconds) === 'number' && check.timeoutSeconds % 1 === 0
+                    const timeoutSeconds = typeof check.timeoutSeconds === 'number' && check.timeoutSeconds % 1 === 0
                         && check.timeoutSeconds >= 1 && check.timeoutSeconds <= 10
                         ? check.timeoutSeconds : false;
 
-                    if (group && protocol && url && method && successCodes !== false && timeoutSeconds && portOk && dnsOk) {
-                        const checkObject = { ...check, userId };
+                    const hasIsActive = typeof check.isActive === 'boolean';
+                    const serviceName = typeof check.serviceName === 'string' && check.serviceName.trim().length > 0 ? check.serviceName.trim() : false;
+
+                    if (group && protocol && url && method && successCodes !== false && timeoutSeconds && portOk && dnsOk && hasIsActive && serviceName) {
+                        // Build sanitized object using validated values only
+                        const checkObject = {
+                            userId,
+                            group,
+                            protocol,
+                            url,
+                            timeoutSeconds,
+                            isActive: check.isActive,
+                            serviceName,
+                        };
+
+                        if (protocol === 'http' || protocol === 'https') {
+                            checkObject.method = method;
+                            checkObject.successCodes = successCodes || [];
+                        } else if (protocol === 'tcp') {
+                            checkObject.port = check.port; // already validated by portOk
+                        } else if (protocol === 'dns') {
+                            checkObject.dnsRecordType = check.dnsRecordType; // validated by dnsOk
+                            if (typeof check.expectedDnsValue === 'string' && check.expectedDnsValue.trim().length > 0) {
+                                checkObject.expectedDnsValue = check.expectedDnsValue.trim();
+                            }
+                        }
+
                         return checkObject;
                     } else {
                         badRequests.push(check);
