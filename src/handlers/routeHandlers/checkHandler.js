@@ -172,9 +172,9 @@ handler._check.post = async (requestProperties, callback) => {
                                 action: 'CREATE',
                                 changes: saved.toObject ? saved.toObject() : saved
                             });
-                            entry.save().catch(() => {});
+                            entry.save().catch(() => { });
                         });
-                    } catch(_) {}
+                    } catch (_) { }
                     // return the data about the new checks created
                     callback(200, {
                         checks: checkListResponse
@@ -346,8 +346,8 @@ handler._check.put = async (requestProperties, callback) => {
                             action: 'UPDATE',
                             changes: requestProperties.body.checks?.[0] || {}
                         });
-                        entry.save().catch(() => {});
-                    } catch(_) {}
+                        entry.save().catch(() => { });
+                    } catch (_) { }
                     callback(200, {
                         checks: [checkObject]
                     });
@@ -431,8 +431,8 @@ handler._check.delete = async (requestProperties, callback) => {
                         action: 'DELETE',
                         changes: {}
                     });
-                    entry.save().catch(() => {});
-                } catch(_) {}
+                    entry.save().catch(() => { });
+                } catch (_) { }
                 return callback(200);
 
             } else {

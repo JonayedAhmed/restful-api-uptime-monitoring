@@ -138,16 +138,16 @@ worker.performCheck = async (checkData) => {
         const protocolToUse = checkData.protocol === 'http' ? http : https;
         const exec = () => new Promise((resolve, reject) => {
             let req = protocolToUse.request(requestDetails, (res) => {
-            // grab the status of the response 
-            const status = res.statusCode;
+                // grab the status of the response 
+                const status = res.statusCode;
 
-            // calculate the response time
-            const responseTime = Date.now() - startTime;
+                // calculate the response time
+                const responseTime = Date.now() - startTime;
 
-            // update the check outcome and pass to the next process.
-            checkOutcome.responseCode = status;
-            checkOutcome.responseTime = responseTime;
-            resolve();
+                // update the check outcome and pass to the next process.
+                checkOutcome.responseCode = status;
+                checkOutcome.responseTime = responseTime;
+                resolve();
             });
 
             req.on('error', (e) => {
