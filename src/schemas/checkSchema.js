@@ -26,6 +26,11 @@ const checkSchema = mongoose.Schema({
         type: Array,
         default: []
     },
+    // Optional tags for filtering (e.g., prod, staging, team-x)
+    tags: {
+        type: [String],
+        default: []
+    },
     // For TCP checks
     port: {
         type: Number,
@@ -62,6 +67,9 @@ const checkSchema = mongoose.Schema({
         type: String,
         required: true
     },
+    // Flapping control counters
+    failureStreak: { type: Number, default: 0 },
+    successStreak: { type: Number, default: 0 },
     // Alert bookkeeping to reduce noise
     lastAlertState: {
         type: String,

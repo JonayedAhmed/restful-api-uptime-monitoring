@@ -13,6 +13,7 @@ const { tokenHandler } = require('./handlers/routeHandlers/tokenHandler');
 const { checkHandler } = require('./handlers/routeHandlers/checkHandler');
 const { healthHandler } = require('./handlers/routeHandlers/healthHandler');
 const { settingsHandler } = require('./handlers/routeHandlers/settingsHandler');
+const { metricsHandler } = require('./handlers/routeHandlers/metricsHandler');
 
 const routes = {
     sample: sampleHandler,
@@ -21,6 +22,7 @@ const routes = {
     check: checkHandler,
     health: healthHandler,
     settings: settingsHandler,
+    metrics: metricsHandler,
 }
 
 

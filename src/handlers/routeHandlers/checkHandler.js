@@ -13,12 +13,14 @@ const { maxChecks } = require('../../helpers/environments');
 const tokenSchema = require('../../schemas/tokenSchema');
 const userSchema = require('../../schemas/userSchema');
 const checkSchema = require('../../schemas/checkSchema');
+const auditSchema = require('../../schemas/auditSchema');
 
 // Creating a model based on userSchema and tokenSchema
 // Model for object mapping (ODM)
 const Token = new mongoose.model("Token", tokenSchema);
 const User = new mongoose.model("User", userSchema);
 const Check = new mongoose.model("Check", checkSchema);
+const Audit = new mongoose.model("Audit", auditSchema);
 
 // module scaffolding
 const handler = {};
@@ -128,6 +130,13 @@ handler._check.post = async (requestProperties, callback) => {
                             }
                         }
 
+                        // Optional tags: array of strings
+                        if (Array.isArray(check.tags)) {
+                            checkObject.tags = check.tags
+                                .map(t => typeof t === 'string' ? t.trim() : '')
+                                .filter(Boolean);
+                        }
+
                         return checkObject;
                     } else {
                         badRequests.push(check);
@@ -153,6 +162,19 @@ handler._check.post = async (requestProperties, callback) => {
                 User.updateOne({ userId: userId }, {
                     $set: userObject
                 }).then(() => {
+                    try {
+                        // Write audit log entries
+                        checkListResponse.forEach((saved) => {
+                            const entry = new Audit({
+                                userId,
+                                entity: 'Check',
+                                entityId: String(saved._id),
+                                action: 'CREATE',
+                                changes: saved.toObject ? saved.toObject() : saved
+                            });
+                            entry.save().catch(() => {});
+                        });
+                    } catch(_) {}
                     // return the data about the new checks created
                     callback(200, {
                         checks: checkListResponse
@@ -250,8 +272,9 @@ handler._check.put = async (requestProperties, callback) => {
     const timeoutSeconds = requestProperties.body.checks[0].timeoutSeconds;
     const isActive = requestProperties.body.checks[0].isActive || false;
     const serviceName = requestProperties.body.checks[0].serviceName;
+    const tags = requestProperties.body.checks[0].tags;
 
-    if (id && (protocol || url || method || successCodes || timeoutSeconds || isActive || serviceName || group || port || dnsRecordType || expectedDnsValue)) {
+    if (id && (protocol || url || method || successCodes || timeoutSeconds || isActive || serviceName || group || port || dnsRecordType || expectedDnsValue || tags)) {
 
         const checkData = await Check.find({ _id: id });
 
@@ -305,11 +328,26 @@ handler._check.put = async (requestProperties, callback) => {
                 if (serviceName) {
                     checkObject.serviceName = serviceName
                 }
+                if (Array.isArray(tags)) {
+                    checkObject.tags = tags
+                        .map(t => typeof t === 'string' ? t.trim() : '')
+                        .filter(Boolean);
+                }
                 checkObject.isActive = isActive;
 
                 Check.updateOne({ _id: id }, {
                     $set: checkObject
                 }).then((response) => {
+                    try {
+                        const entry = new Audit({
+                            userId: checkObject.userId,
+                            entity: 'Check',
+                            entityId: String(id),
+                            action: 'UPDATE',
+                            changes: requestProperties.body.checks?.[0] || {}
+                        });
+                        entry.save().catch(() => {});
+                    } catch(_) {}
                     callback(200, {
                         checks: [checkObject]
                     });
@@ -385,6 +423,16 @@ handler._check.delete = async (requestProperties, callback) => {
                     });
                 }
 
+                try {
+                    const entry = new Audit({
+                        userId: checkObject.userId,
+                        entity: 'Check',
+                        entityId: String(id),
+                        action: 'DELETE',
+                        changes: {}
+                    });
+                    entry.save().catch(() => {});
+                } catch(_) {}
                 return callback(200);
 
             } else {

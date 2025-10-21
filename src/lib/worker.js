@@ -28,6 +28,8 @@ const User = new mongoose.model("User", userSchema);
 const Check = new mongoose.model("Check", checkSchema);
 const HealthLog = new mongoose.model("HealthLog", healthSchema);
 const Settings = new mongoose.model("Settings", settingsSchema);
+// metrics (in-memory basic counters)
+const metrics = { lastRunAt: 0, errorCount: 0, processed: 0, queueLength: 0, inFlight: 0, concurrency: 5 };
 
 // worker object - module scaffolding
 const worker = {};
@@ -62,6 +64,47 @@ worker.ensureTTLIndex = async (userId) => {
 }
 
 // performCheck: dispatch by protocol and emit a normalized outcome
+// Retry wrapper with exponential backoff + jitter and per-check timeout
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+const withRetry = async (fn, {
+    retries = 2,
+    baseDelayMs = 200,
+    jitterMs = 150
+} = {}) => {
+    let attempt = 0;
+    while (true) {
+        try {
+            return await fn();
+        } catch (e) {
+            attempt++;
+            if (attempt > retries) throw e;
+            const backoff = baseDelayMs * Math.pow(2, attempt - 1);
+            const jitter = Math.floor(Math.random() * jitterMs);
+            await sleep(backoff + jitter);
+        }
+    }
+};
+
+// Apply concurrency limit (avoid hammering)
+const CONCURRENCY = 5;
+let inFlight = 0;
+const queue = [];
+const runWithConcurrency = async (task) => {
+    if (inFlight >= CONCURRENCY) {
+        await new Promise(res => queue.push(res));
+    }
+    inFlight++;
+    metrics.inFlight = inFlight;
+    try {
+        return await task();
+    } finally {
+        inFlight--;
+        metrics.inFlight = inFlight;
+        const next = queue.shift();
+        if (next) next();
+    }
+};
+
 worker.performCheck = async (checkData) => {
 
     // prepare the initial check outcome
@@ -93,8 +136,8 @@ worker.performCheck = async (checkData) => {
         }
 
         const protocolToUse = checkData.protocol === 'http' ? http : https;
-
-        let req = protocolToUse.request(requestDetails, (res) => {
+        const exec = () => new Promise((resolve, reject) => {
+            let req = protocolToUse.request(requestDetails, (res) => {
             // grab the status of the response 
             const status = res.statusCode;
 
@@ -104,41 +147,27 @@ worker.performCheck = async (checkData) => {
             // update the check outcome and pass to the next process.
             checkOutcome.responseCode = status;
             checkOutcome.responseTime = responseTime;
+            resolve();
+            });
 
-            if (!outcomeSent) {
-                worker.processCheckOutcome(checkData, checkOutcome);
-                outcomeSent = true;
-            }
+            req.on('error', (e) => {
+                reject(e);
+            });
+
+            req.on('timeout', () => {
+                reject(new Error('timeout'));
+            });
+
+            req.end();
         });
 
-        req.on('error', (e) => {
-            checkOutcome = {
-                error: true,
-                value: e
-            };
-
-            // update the check outcome and pass to the next process.
-            if (!outcomeSent) {
-                worker.processCheckOutcome(checkData, checkOutcome);
-                outcomeSent = true;
-            }
-        });
-
-        req.on('timeout', (e) => {
-            checkOutcome = {
-                error: true,
-                value: 'timeout'
-            };
-
-            // update the check outcome and pass to the next process.
-            if (!outcomeSent) {
-                worker.processCheckOutcome(checkData, checkOutcome);
-                outcomeSent = true;
-            }
-        })
-
-        // req send
-        req.end();
+        // run with retry + concurrency
+        try {
+            await runWithConcurrency(() => withRetry(exec));
+        } catch (e) {
+            checkOutcome = { error: true, value: e };
+        }
+        worker.processCheckOutcome(checkData, checkOutcome);
         return;
     }
 
@@ -157,9 +186,17 @@ worker.performCheck = async (checkData) => {
             }
             worker.processCheckOutcome(checkData, checkOutcome);
         };
-        socket.setTimeout(checkData.timeoutSeconds * 1000, () => onDone(new Error('timeout')));
-        socket.once('error', onDone);
-        socket.connect(port, hostname, () => onDone());
+        const execTcp = () => new Promise((resolve, reject) => {
+            socket.setTimeout(checkData.timeoutSeconds * 1000, () => reject(new Error('timeout')));
+            socket.once('error', reject);
+            socket.connect(port, hostname, () => resolve());
+        });
+        try {
+            await runWithConcurrency(() => withRetry(execTcp));
+            onDone(null);
+        } catch (e) {
+            onDone(e);
+        }
         return;
     }
 
@@ -169,8 +206,9 @@ worker.performCheck = async (checkData) => {
             worker.processCheckOutcome(checkData, checkOutcome);
             return;
         }
+        const execIcmp = () => ping.promise.probe(hostname, { timeout: checkData.timeoutSeconds });
         try {
-            const res = await ping.promise.probe(hostname, { timeout: checkData.timeoutSeconds });
+            const res = await runWithConcurrency(() => withRetry(execIcmp));
             const responseTime = res?.time && !isNaN(Number(res.time)) ? Number(res.time) : (Date.now() - startTime);
             checkOutcome = { error: false, success: !!res.alive, responseTime };
         } catch (e) {
@@ -184,7 +222,8 @@ worker.performCheck = async (checkData) => {
         const rrtype = checkData.dnsRecordType || 'A';
         try {
             const start = Date.now();
-            const records = await dns.resolve(hostname, rrtype);
+            const execDns = () => dns.resolve(hostname, rrtype);
+            const records = await runWithConcurrency(() => withRetry(execDns));
             const responseTime = Date.now() - start;
             let success = Array.isArray(records) && records.length > 0;
             if (success && checkData.expectedDnsValue) {
@@ -223,11 +262,22 @@ worker.processCheckOutcome = async (checkData, checkOutcome) => {
     // checkData.lastChecked is required as initial state we considered that as down but first time it may go to up, whether its first time or not is checked by checkData.lastChecked
     let alertRequired = checkData.lastChecked && checkData.state !== state ? true : false
 
+    // flapping control: maintain success/failure streaks
+    const failureStreak = state === 'DOWN' ? (Number(checkData.failureStreak) || 0) + 1 : 0;
+    const successStreak = state === 'UP' ? (Number(checkData.successStreak) || 0) + 1 : 0;
+    const flapThreshold = 2; // require at least 2 consecutive results before alerting
+    if (checkData.lastChecked && checkData.state !== state) {
+        if (state === 'DOWN' && failureStreak < flapThreshold) alertRequired = false;
+        if (state === 'UP' && successStreak < flapThreshold && checkData.lastAlertState === 'DOWN') alertRequired = false;
+    }
+
     // update the check data
     let newCheckData = checkData;
     newCheckData.state = state;
     newCheckData.lastChecked = Date.now();
     newCheckData.responseTime = responseTime;
+    newCheckData.failureStreak = failureStreak;
+    newCheckData.successStreak = successStreak;
 
 
     Check.updateOne({ _id: newCheckData._id }, {
@@ -271,6 +321,7 @@ worker.processCheckOutcome = async (checkData, checkOutcome) => {
             }
         }
     }).catch(err => {
+        metrics.errorCount++;
         console.log('Error: failed to update check data state and lastChecked.')
     })
 
@@ -373,9 +424,12 @@ worker.gatherAllChecks = async () => {
         try {
             console.log(`[Checks] Executed at ${new Date().toISOString()} (count=${checks.length})`);
         } catch (_) { }
+        metrics.lastRunAt = Date.now();
+        metrics.queueLength = checks.length;
         checks.forEach(checkData => {
             // pass the data to the next process.
             worker.validateCheckData(checkData);
+            metrics.processed++;
         });
     } else {
         console.log('Could not find any checks to process.');
@@ -402,4 +456,5 @@ worker.init = () => {
 }
 
 // export 
+worker.metrics = metrics;
 module.exports = worker;
