@@ -23,6 +23,7 @@ const routes = {
     settings: settingsHandler,
     metrics: metricsHandler,
     deployments: deploymentsHandler,
+    terminal: deploymentsHandler,
 }
 
 
