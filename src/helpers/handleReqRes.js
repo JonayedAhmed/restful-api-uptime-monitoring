@@ -70,11 +70,35 @@ handler.handleReqRes = (req, res) => {
         } else {
             chosenHandler(requestProperties, (statusCode, payload) => {
                 statusCode = typeof (statusCode) === 'number' ? statusCode : 500;
-                payload = typeof (payload) === 'object' ? payload : {};
+                // Support SSE takeover by handlers
+                if (payload && typeof payload === 'object' && payload.__sse === true && typeof payload.setup === 'function') {
+                    // Handler will manage the response stream
+                    res.writeHead(200, {
+                        'Content-Type': 'text/event-stream',
+                        'Cache-Control': 'no-cache',
+                        'Connection': 'keep-alive',
+                        'Access-Control-Allow-Origin': '*'
+                    });
+                    // Initial comment to keep connection open
+                    res.write(`: connected\n\n`);
+                    payload.setup(res);
+                    return; // do not send JSON
+                }
+                // Support raw responses for non-JSON payloads (e.g., script downloads)
+                if (payload && typeof payload === 'object' && payload.__raw === true) {
+                    const body = typeof payload.body === 'string' ? payload.body : '';
+                    const contentType = typeof payload.contentType === 'string' ? payload.contentType : 'text/plain; charset=utf-8';
+                    // return the final response (raw)
+                    res.setHeader('Content-Type', contentType);
+                    res.writeHead(statusCode);
+                    res.end(body);
+                    return;
+                }
 
+                payload = typeof (payload) === 'object' ? payload : {};
                 const payloadString = JSON.stringify(payload);
 
-                // return the final response
+                // return the final response (JSON)
                 res.setHeader('Content-Type', 'application/json');
                 res.writeHead(statusCode);
                 res.end(payloadString);
