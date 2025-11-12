@@ -88,6 +88,86 @@ handler._impl.get = async (req, callback) => {
             const status = isOnline ? 'online' : 'offline';
             return callback(200, { data: { status, lastCheckIn: agent.lastSeenAt || null } });
         }
+
+        // Check if requesting details for a specific agent
+        const agentId = typeof req?.queryStringObject?.id === 'string' ? req.queryStringObject.id : undefined;
+
+        if (agentId) {
+            // Return detailed information for a specific agent
+            const DeploymentProject = mongoose.model('DeploymentProject');
+            const DeploymentJob = mongoose.model('DeploymentJob');
+
+            const agent = await DeploymentAgent.findById(agentId);
+            if (!agent) return callback(404, { error: 'Agent not found' });
+
+            // Calculate online status
+            const last = agent.lastSeenAt ? new Date(agent.lastSeenAt).getTime() : 0;
+            const isOnline = last && (Date.now() - last) < 60_000;
+
+            // Find all projects assigned to this agent
+            const assignedProjects = await DeploymentProject.find({
+                'deploymentTargets.agentId': agentId
+            }).select('name repoUrl branch deploymentTargets');
+
+            // Get job statistics for this agent
+            const totalJobs = await DeploymentJob.countDocuments({ agentId });
+            const successfulJobs = await DeploymentJob.countDocuments({ agentId, status: 'success' });
+            const failedJobs = await DeploymentJob.countDocuments({ agentId, status: 'failed' });
+            const pendingJobs = await DeploymentJob.countDocuments({ agentId, status: 'pending' });
+            const runningJobs = await DeploymentJob.countDocuments({ agentId, status: 'running' });
+
+            // Get recent job history (last 20 jobs)
+            const recentJobs = await DeploymentJob.find({ agentId })
+                .sort({ createdAt: -1 })
+                .limit(20)
+                .populate('projectId', 'name')
+                .lean();
+
+            // Calculate uptime statistics (last 30 days)
+            const thirtyDaysAgo = new Date();
+            thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+            const recentJobsStats = await DeploymentJob.find({
+                agentId,
+                createdAt: { $gte: thirtyDaysAgo }
+            });
+
+            const jobsByType = {
+                deploy: recentJobsStats.filter(j => j.type === 'deploy').length,
+                start: recentJobsStats.filter(j => j.type === 'start').length,
+                stop: recentJobsStats.filter(j => j.type === 'stop').length,
+                restart: recentJobsStats.filter(j => j.type === 'restart').length
+            };
+
+            return callback(200, {
+                data: {
+                    agent: {
+                        ...agent.toObject(),
+                        status: isOnline ? 'online' : 'offline'
+                    },
+                    assignedProjects: assignedProjects.map(p => ({
+                        _id: p._id,
+                        name: p.name,
+                        repoUrl: p.repoUrl,
+                        branch: p.branch,
+                        environments: p.deploymentTargets
+                            .filter(t => t.agentId && t.agentId.toString() === agentId)
+                            .map(t => t.environment)
+                    })),
+                    statistics: {
+                        totalJobs,
+                        successfulJobs,
+                        failedJobs,
+                        pendingJobs,
+                        runningJobs,
+                        successRate: totalJobs > 0 ? ((successfulJobs / totalJobs) * 100).toFixed(1) : '0.0',
+                        jobsByType
+                    },
+                    recentJobs
+                }
+            });
+        }
+
         const list = await DeploymentAgent.find({}).sort({ createdAt: -1 });
         callback(200, { data: list });
     } catch (e) {

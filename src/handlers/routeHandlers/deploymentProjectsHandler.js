@@ -25,8 +25,75 @@ handler._impl = {};
 // GET list (optional environment filter)
 handler._impl.get = async (req, callback) => {
     try {
+        // Check if requesting details for a specific project
+        const projectId = typeof req?.queryStringObject?.id === 'string' ? req.queryStringObject.id : undefined;
+
+        if (projectId) {
+            // Return detailed information for a specific project
+            const DeploymentJob = mongoose.model('DeploymentJob');
+            const PipelineTemplate = mongoose.model('PipelineTemplate');
+            const DeploymentAgent = mongoose.model('DeploymentAgent');
+
+            const project = await DeploymentProject.findById(projectId);
+            if (!project) return callback(404, { error: 'Project not found' });
+
+            // Get pipeline template details
+            let pipelineTemplate = null;
+            if (project.pipelineTemplateId) {
+                pipelineTemplate = await PipelineTemplate.findById(project.pipelineTemplateId);
+            }
+
+            // Get recent deployment history (last 20 jobs)
+            const deploymentHistory = await DeploymentJob.find({ projectId })
+                .sort({ createdAt: -1 })
+                .limit(20)
+                .lean();
+
+            // Get deployment statistics per environment
+            const stats = {};
+            for (const target of project.deploymentTargets || []) {
+                const env = target.environment;
+                const totalDeployments = await DeploymentJob.countDocuments({ projectId, environment: env });
+                const successfulDeployments = await DeploymentJob.countDocuments({ projectId, environment: env, status: 'success' });
+                const failedDeployments = await DeploymentJob.countDocuments({ projectId, environment: env, status: 'failed' });
+                const lastDeployment = await DeploymentJob.findOne({ projectId, environment: env }).sort({ createdAt: -1 });
+
+                // Get agent details
+                let agent = null;
+                if (target.agentId) {
+                    agent = await DeploymentAgent.findById(target.agentId).select('name hostType status lastCheckIn');
+                }
+
+                stats[env] = {
+                    totalDeployments,
+                    successfulDeployments,
+                    failedDeployments,
+                    successRate: totalDeployments > 0 ? ((successfulDeployments / totalDeployments) * 100).toFixed(1) : '0.0',
+                    lastDeployment: lastDeployment ? {
+                        status: lastDeployment.status,
+                        createdAt: lastDeployment.createdAt,
+                        finishedAt: lastDeployment.finishedAt,
+                        duration: lastDeployment.finishedAt && lastDeployment.startedAt
+                            ? Math.round((new Date(lastDeployment.finishedAt) - new Date(lastDeployment.startedAt)) / 1000)
+                            : null
+                    } : null,
+                    agent
+                };
+            }
+
+            return callback(200, {
+                data: {
+                    project,
+                    pipelineTemplate,
+                    deploymentHistory,
+                    stats
+                }
+            });
+        }
+
+        // Original list logic
         const env = typeof req?.queryStringObject?.environment === 'string' ? req.queryStringObject.environment : undefined;
-        const filter = env ? { environment: env } : {};
+        const filter = env ? { 'deploymentTargets.environment': env } : {};
         const list = await DeploymentProject.find(filter).sort({ createdAt: -1 });
         callback(200, { data: list });
     } catch (e) {
@@ -49,7 +116,7 @@ handler._impl.post = async (req, callback) => {
                 branch: body?.branch || 'main',
                 pipelineTemplateId: body?.pipelineTemplateId || null,
                 envVars: Array.isArray(body?.envVars) ? body.envVars : [],
-                environment: body?.environment,
+                deploymentTargets: Array.isArray(body?.deploymentTargets) ? body.deploymentTargets : [],
                 createdBy: userId,
             });
             await doc.save();
