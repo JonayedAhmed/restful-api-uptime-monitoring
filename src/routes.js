@@ -16,8 +16,6 @@ const { metricsHandler } = require('./handlers/routeHandlers/metricsHandler');
 const { deploymentsHandler } = require('./handlers/routeHandlers/deploymentsHandler');
 const { pipelineTemplatesHandler } = require('./handlers/routeHandlers/pipelineTemplatesHandler');
 const { deploymentProjectsHandler } = require('./handlers/routeHandlers/deploymentProjectsHandler');
-const { deploymentRunsHandler } = require('./handlers/routeHandlers/deploymentRunsHandler');
-const { deploymentLogsHandler } = require('./handlers/routeHandlers/deploymentLogsHandler');
 const { deploymentAgentsHandler } = require('./handlers/routeHandlers/deploymentAgentsHandler');
 const { agentStreamHandler } = require('./handlers/routeHandlers/agentStreamHandler');
 const { jobsHandler } = require('./handlers/routeHandlers/jobsHandler');
@@ -35,8 +33,6 @@ const routes = {
     terminal: deploymentsHandler,
     pipelines: pipelineTemplatesHandler,
     deploymentProjects: deploymentProjectsHandler,
-    deploymentRuns: deploymentRunsHandler,
-    deploymentLogs: deploymentLogsHandler,
     deploymentAgents: deploymentAgentsHandler,
     agentStream: agentStreamHandler,
     jobs: jobsHandler,

@@ -149,6 +149,11 @@ async function handleEvent(event, data, cfg) {
       return;
     }
 
+    if (data.type === 'start' || data.type === 'stop' || data.type === 'restart') {
+      await handleServiceControlJob(data, cfg);
+      return;
+    }
+
     // default: simulate quick success for unknown types
     try {
       await new Promise((r) => setTimeout(r, 200));
@@ -201,6 +206,29 @@ async function copyPath(src, dest) {
       await fs.promises.copyFile(src, dest);
     }
   } catch (_) {}
+}
+
+async function handleServiceControlJob(data, cfg) {
+  const jobId = data.jobId;
+  const type = data.type; // 'start', 'stop', 'restart'
+  const payload = data.payload || {};
+  const command = payload[type + 'Command'] || '';
+
+  if (!command) {
+    await postJobLog(cfg, jobId, 'warn', type + ' command not configured, skipping');
+    try { await request('POST', cfg.serverUrl + '/jobs', { action: 'report', jobId, status: 'SUCCESS', finishedAt: new Date().toISOString() }); } catch (_) {}
+    return;
+  }
+
+  try {
+    await postJobLog(cfg, jobId, 'info', 'Executing ' + type + ': ' + command);
+    await runCommand(command, [], payload.workDir || process.cwd(), jobId, cfg);
+    await postJobLog(cfg, jobId, 'stdout', 'Service ' + type + ' completed successfully');
+    await request('POST', cfg.serverUrl + '/jobs', { action: 'report', jobId, status: 'SUCCESS', finishedAt: new Date().toISOString() });
+  } catch (e) {
+    await postJobLog(cfg, jobId, 'stderr', 'Service ' + type + ' failed: ' + e.message);
+    try { await request('POST', cfg.serverUrl + '/jobs', { action: 'report', jobId, status: 'FAILED', finishedAt: new Date().toISOString() }); } catch (_) {}
+  }
 }
 
 async function handleDeployJob(data, cfg) {
@@ -282,6 +310,17 @@ async function handleDeployJob(data, cfg) {
       await postJobLog(cfg, jobId, 'stderr', 'Some artifacts failed: ' + failedArtifacts.join(', '));
       await request('POST', cfg.serverUrl + '/jobs', { action: 'report', jobId, status: 'FAILED', finishedAt: new Date().toISOString() });
       return;
+    }
+
+    // Auto-start service if configured
+    if (payload.autoStart && payload.startCommand) {
+      await postJobLog(cfg, jobId, 'info', 'Auto-starting service: ' + payload.startCommand);
+      try {
+        await runCommand(payload.startCommand, [], targetDir, jobId, cfg);
+        await postJobLog(cfg, jobId, 'stdout', 'Service started successfully');
+      } catch (e) {
+        await postJobLog(cfg, jobId, 'warn', 'Service start failed: ' + e.message);
+      }
     }
 
     await request('POST', cfg.serverUrl + '/jobs', { action: 'report', jobId, status: 'SUCCESS', finishedAt: new Date().toISOString() });

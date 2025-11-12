@@ -24,17 +24,86 @@ handler.jobsHandler = (req, callback) => {
 handler._impl = {};
 
 // POST: dispatch or report or log
-// dispatch Body: { agentId, type, projectId, payload }
+// dispatch Body: { agentId, type, projectId, payload, environment? }
+//   OR smart dispatch: { projectId, environment, version?, type? }
 // report   Body: { action: 'report', jobId, status?, log?, stage?, finishedAt? }
 // log      Body: { action: 'log', jobId, type?, message }
 handler._impl.post = async (req, callback) => {
     try {
         const action = typeof req?.body?.action === 'string' ? req.body.action : 'dispatch';
         if (action === 'dispatch') {
-            const agentId = typeof req?.body?.agentId === 'string' ? req.body.agentId : null;
-            const type = typeof req?.body?.type === 'string' ? req.body.type : null;
+            // Smart dispatch: find agent from project config
             const projectId = typeof req?.body?.projectId === 'string' ? req.body.projectId : null;
-            const payload = req?.body?.payload || {};
+            const environment = typeof req?.body?.environment === 'string' ? req.body.environment : null;
+            let agentId = typeof req?.body?.agentId === 'string' ? req.body.agentId : null;
+            const type = typeof req?.body?.type === 'string' ? req.body.type : 'deploy';
+            let payload = req?.body?.payload || {};
+
+            // If projectId + environment provided, look up deployment target
+            if (projectId && environment && !agentId) {
+                const deploymentProjectSchema = require('../../schemas/deploymentProjectSchema');
+                const pipelineTemplateSchema = require('../../schemas/pipelineTemplateSchema');
+                const DeploymentProject = mongoose.model('DeploymentProject', deploymentProjectSchema);
+                const PipelineTemplate = mongoose.model('PipelineTemplate', pipelineTemplateSchema);
+                
+                const project = await DeploymentProject.findById(projectId);
+                if (!project) return callback(404, { error: 'Project not found' });
+                
+                const target = project.deploymentTargets.find(t => t.environment === environment);
+                if (!target) return callback(400, { error: `No deployment target configured for environment: ${environment}` });
+                
+                // Get pipeline template commands
+                let buildCommands = [];
+                let runCommands = [];
+                let stopCommands = [];
+                if (project.pipelineTemplateId) {
+                    const pipeline = await PipelineTemplate.findById(project.pipelineTemplateId);
+                    if (pipeline) {
+                        buildCommands = pipeline.buildCommands || [];
+                        runCommands = pipeline.runCommands || [];
+                        stopCommands = pipeline.stopCommands || [];
+                    }
+                }
+                
+                agentId = target.agentId;
+                
+                // Build payload based on job type
+                if (type === 'deploy') {
+                    payload = {
+                        ...payload,
+                        repository: project.repoUrl,
+                        branch: project.branch || 'main',
+                        commands: buildCommands, // Use pipeline's build commands
+                        artifacts: target.artifacts || [],
+                        deployPath: target.deployPath || '',
+                        envVars: project.envVars || [],
+                        autoStart: target.autoStart || false,
+                        startCommand: target.autoStart && runCommands.length > 0 ? runCommands.join(' && ') : '',
+                        version: typeof req?.body?.version === 'string' ? req.body.version : undefined,
+                    };
+                } else if (type === 'start') {
+                    payload = {
+                        ...payload,
+                        startCommand: runCommands.length > 0 ? runCommands.join(' && ') : '',
+                        workDir: target.deployPath || ''
+                    };
+                } else if (type === 'stop') {
+                    payload = {
+                        ...payload,
+                        stopCommand: stopCommands.length > 0 ? stopCommands.join(' && ') : '',
+                        workDir: target.deployPath || ''
+                    };
+                } else if (type === 'restart') {
+                    payload = {
+                        ...payload,
+                        restartCommand: stopCommands.length > 0 && runCommands.length > 0 
+                            ? `${stopCommands.join(' && ')} && ${runCommands.join(' && ')}`
+                            : '',
+                        workDir: target.deployPath || ''
+                    };
+                }
+            }
+
             if (!agentId || !type) return callback(400, { error: 'agentId and type required' });
 
             const jobId = `job_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
