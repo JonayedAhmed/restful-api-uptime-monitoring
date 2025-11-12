@@ -15,7 +15,7 @@ const DeploymentProject = mongoose.model('DeploymentProject', deploymentProjectS
 async function migrateProjects() {
     console.log('🔄 Starting project schema migration...');
     console.log(`Environment: ${process.env.NODE_ENV || 'staging'}`);
-    
+
     try {
         // Connect to MongoDB
         await mongoose.connect(mongoString);
@@ -65,14 +65,14 @@ async function migrateProjects() {
 
                 // Update project with new structure
                 project.deploymentTargets = [deploymentTarget];
-                
+
                 // Remove old fields (they'll be undefined in new schema anyway)
                 // Note: Mongoose will ignore undefined fields on save
                 project.environment = undefined;
                 project.defaultServerId = undefined;
 
                 await project.save();
-                
+
                 console.log(`   ✅ Migrated successfully!`);
                 console.log(`   New deploymentTargets: ${JSON.stringify(deploymentTarget, null, 2)}`);
                 migratedCount++;

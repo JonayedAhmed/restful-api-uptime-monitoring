@@ -13,7 +13,7 @@ const DeploymentJob = new mongoose.model('DeploymentJob', deploymentJobSchema);
 const handler = {};
 
 handler.jobsHandler = (req, callback) => {
-    const accepted = ['post', 'options'];
+    const accepted = ['get', 'post', 'options'];
     if (accepted.includes(req?.method)) {
         if (req.method === 'options') return callback(204, {});
         return handler._impl[req.method](req, callback);
@@ -22,6 +22,41 @@ handler.jobsHandler = (req, callback) => {
 };
 
 handler._impl = {};
+
+// GET: list jobs with filters
+// Query params: projectId, environment, status, agentId, type, limit, skip
+handler._impl.get = async (req, callback) => {
+    try {
+        const { queryStringObject } = req;
+        const projectId = typeof queryStringObject?.projectId === 'string' ? queryStringObject.projectId : null;
+        const environment = typeof queryStringObject?.environment === 'string' ? queryStringObject.environment : null;
+        const status = typeof queryStringObject?.status === 'string' ? queryStringObject.status : null;
+        const agentId = typeof queryStringObject?.agentId === 'string' ? queryStringObject.agentId : null;
+        const type = typeof queryStringObject?.type === 'string' ? queryStringObject.type : null;
+        const limit = parseInt(queryStringObject?.limit) || 50;
+        const skip = parseInt(queryStringObject?.skip) || 0;
+
+        const filter = {};
+        if (projectId) filter.projectId = projectId;
+        if (environment) filter['payload.environment'] = environment;
+        if (status) filter.status = status;
+        if (agentId) filter.agentId = agentId;
+        if (type) filter.type = type;
+
+        const jobs = await DeploymentJob.find(filter)
+            .sort({ createdAt: -1 })
+            .limit(limit)
+            .skip(skip)
+            .lean();
+
+        const total = await DeploymentJob.countDocuments(filter);
+
+        callback(200, { data: jobs, total, limit, skip });
+    } catch (e) {
+        console.error('[jobsHandler.get] error:', e);
+        callback(500, { error: 'Failed to fetch jobs' });
+    }
+};
 
 // POST: dispatch or report or log
 // dispatch Body: { agentId, type, projectId, payload, environment? }
@@ -45,13 +80,13 @@ handler._impl.post = async (req, callback) => {
                 const pipelineTemplateSchema = require('../../schemas/pipelineTemplateSchema');
                 const DeploymentProject = mongoose.model('DeploymentProject', deploymentProjectSchema);
                 const PipelineTemplate = mongoose.model('PipelineTemplate', pipelineTemplateSchema);
-                
+
                 const project = await DeploymentProject.findById(projectId);
                 if (!project) return callback(404, { error: 'Project not found' });
-                
+
                 const target = project.deploymentTargets.find(t => t.environment === environment);
                 if (!target) return callback(400, { error: `No deployment target configured for environment: ${environment}` });
-                
+
                 // Get pipeline template commands
                 let buildCommands = [];
                 let runCommands = [];
@@ -64,9 +99,9 @@ handler._impl.post = async (req, callback) => {
                         stopCommands = pipeline.stopCommands || [];
                     }
                 }
-                
+
                 agentId = target.agentId;
-                
+
                 // Build payload based on job type
                 if (type === 'deploy') {
                     payload = {
@@ -96,7 +131,7 @@ handler._impl.post = async (req, callback) => {
                 } else if (type === 'restart') {
                     payload = {
                         ...payload,
-                        restartCommand: stopCommands.length > 0 && runCommands.length > 0 
+                        restartCommand: stopCommands.length > 0 && runCommands.length > 0
                             ? `${stopCommands.join(' && ')} && ${runCommands.join(' && ')}`
                             : '',
                         workDir: target.deployPath || ''

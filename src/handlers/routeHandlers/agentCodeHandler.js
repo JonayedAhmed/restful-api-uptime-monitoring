@@ -6,10 +6,10 @@
 const handler = {};
 
 handler.agentCodeHandler = (req, callback) => {
-    if (req.method === 'options') return callback(204, {});
-    if (req.method !== 'get') return callback(405, { error: 'Method Not Allowed' });
+  if (req.method === 'options') return callback(204, {});
+  if (req.method !== 'get') return callback(405, { error: 'Method Not Allowed' });
 
-    const code = `#!/usr/bin/env node
+  const code = `#!/usr/bin/env node
 // Minimal SSE + heartbeat agent runtime (no external deps)
 const fs = require('fs');
 const path = require('path');
@@ -345,7 +345,7 @@ async function handleDeployJob(data, cfg) {
 })();
 `;
 
-    return callback(200, { __raw: true, contentType: 'text/javascript; charset=utf-8', body: code });
+  return callback(200, { __raw: true, contentType: 'text/javascript; charset=utf-8', body: code });
 };
 
 module.exports = handler;
