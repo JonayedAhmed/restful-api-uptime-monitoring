@@ -17,6 +17,13 @@ const deploymentTargetSchema = new mongoose.Schema({
     artifacts: { type: [String], default: [] }, // e.g., ["dist/**", "package.json"]
     deployPath: { type: String, default: '' }, // Where on agent server, e.g., "/var/www/staging/my-api"
     autoStart: { type: Boolean, default: false }, // Auto-start service after deployment (uses pipeline's run command)
+    // Port management
+    port: { type: Number }, // Host port to expose (e.g., 8001)
+    containerPort: { type: Number, default: 3000 }, // Internal container port (default 3000)
+    // Docker options
+    dockerVolumes: { type: [String], default: [] }, // Volume mounts (e.g., ["/host/path:/container/path"])
+    dockerEnvVars: { type: [String], default: [] }, // Docker-specific env vars
+    dockerNetwork: { type: String, default: 'bridge' }, // Docker network mode
 }, { _id: false });
 
 const deploymentProjectSchema = new mongoose.Schema({

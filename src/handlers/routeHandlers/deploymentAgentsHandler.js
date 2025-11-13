@@ -13,7 +13,7 @@ const DeploymentAgent = new mongoose.model('DeploymentAgent', deploymentAgentSch
 const handler = {};
 
 handler.deploymentAgentsHandler = (requestProperties, callback) => {
-    const accepted = ['get', 'post', 'options'];
+    const accepted = ['get', 'post', 'delete', 'options'];
     if (accepted.includes(requestProperties?.method)) {
         if (requestProperties.method === 'options') return callback(204, {});
         return handler._impl[requestProperties.method](requestProperties, callback);
@@ -222,7 +222,9 @@ handler._impl.post = async (req, callback) => {
         // Registration path (control-plane UI)
         const token = typeof headersObject?.token === 'string' ? headersObject.token : false;
         const userId = typeof body?.userId === 'string' ? body.userId : false;
-        if (!token || !userId) return callback(403, { error: 'Auth required' });
+        
+        if (!token) return callback(403, { error: 'Auth token required in headers' });
+        if (!userId) return callback(403, { error: 'userId required in request body' });
 
         tokenHandler._token.verify(token, userId, async (ok) => {
             if (!ok) return callback(403, { error: 'Authentication failed.' });
@@ -246,6 +248,21 @@ handler._impl.post = async (req, callback) => {
         });
     } catch (e) {
         callback(500, { error: 'Failed to register agent' });
+    }
+};
+
+// DELETE: remove agent by id
+handler._impl.delete = async (req, callback) => {
+    try {
+        const id = typeof req?.queryStringObject?.id === 'string' ? req.queryStringObject.id : null;
+        if (!id) return callback(400, { error: 'id required' });
+        
+        const agent = await DeploymentAgent.findByIdAndDelete(id);
+        if (!agent) return callback(404, { error: 'Agent not found' });
+        
+        callback(200, { data: { message: 'Agent deleted successfully' } });
+    } catch (e) {
+        callback(500, { error: 'Failed to delete agent' });
     }
 };
 
