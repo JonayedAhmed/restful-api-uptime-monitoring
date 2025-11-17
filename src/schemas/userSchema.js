@@ -23,6 +23,10 @@ const userSchema = mongoose.Schema({
         type: String,
         required: true
     },
+    profilePicture: {
+        type: String,
+        default: null
+    },
     tosAgreement: {
         type: Boolean,
         required: true
