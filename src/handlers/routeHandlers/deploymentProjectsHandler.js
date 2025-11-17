@@ -53,10 +53,31 @@ handler._impl.get = async (req, callback) => {
             const stats = {};
             for (const target of project.deploymentTargets || []) {
                 const env = target.environment;
-                const totalDeployments = await DeploymentJob.countDocuments({ projectId, environment: env });
-                const successfulDeployments = await DeploymentJob.countDocuments({ projectId, environment: env, status: 'success' });
-                const failedDeployments = await DeploymentJob.countDocuments({ projectId, environment: env, status: 'failed' });
-                const lastDeployment = await DeploymentJob.findOne({ projectId, environment: env }).sort({ createdAt: -1 });
+                const totalDeployments = await DeploymentJob.countDocuments({ projectId, 'payload.environment': env, type: 'deploy' });
+                const successfulDeployments = await DeploymentJob.countDocuments({ projectId, 'payload.environment': env, type: 'deploy', status: 'SUCCESS' });
+                const failedDeployments = await DeploymentJob.countDocuments({ projectId, 'payload.environment': env, type: 'deploy', status: 'FAILED' });
+                const lastDeployment = await DeploymentJob.findOne({ projectId, 'payload.environment': env, type: 'deploy' }).sort({ createdAt: -1 });
+
+                // Get current runtime status (check last start/stop/deploy job)
+                const lastStatusJob = await DeploymentJob.findOne({
+                    projectId,
+                    'payload.environment': env,
+                    type: { $in: ['start', 'stop', 'deploy'] },
+                    status: 'SUCCESS'
+                }).sort({ createdAt: -1 });
+
+                console.log(`[Runtime Status] Project: ${projectId}, Env: ${env}, Last Job:`, lastStatusJob ? { type: lastStatusJob.type, status: lastStatusJob.status, payloadEnv: lastStatusJob.payload?.environment, createdAt: lastStatusJob.createdAt } : 'NONE');
+
+                let runtimeStatus = 'unknown';
+                if (lastStatusJob) {
+                    if (lastStatusJob.type === 'stop') {
+                        runtimeStatus = 'stopped';
+                    } else if (lastStatusJob.type === 'start' || lastStatusJob.type === 'deploy') {
+                        runtimeStatus = 'running';
+                    }
+                }
+
+                console.log(`[Runtime Status] Result: ${runtimeStatus}`);
 
                 // Get agent details
                 let agent = null;
@@ -69,6 +90,7 @@ handler._impl.get = async (req, callback) => {
                     successfulDeployments,
                     failedDeployments,
                     successRate: totalDeployments > 0 ? ((successfulDeployments / totalDeployments) * 100).toFixed(1) : '0.0',
+                    runtimeStatus,
                     lastDeployment: lastDeployment ? {
                         status: lastDeployment.status,
                         createdAt: lastDeployment.createdAt,
@@ -95,7 +117,39 @@ handler._impl.get = async (req, callback) => {
         const env = typeof req?.queryStringObject?.environment === 'string' ? req.queryStringObject.environment : undefined;
         const filter = env ? { 'deploymentTargets.environment': env } : {};
         const list = await DeploymentProject.find(filter).sort({ createdAt: -1 });
-        callback(200, { data: list });
+
+        // Add runtime status for each project's environments
+        const DeploymentJob = mongoose.model('DeploymentJob');
+        const enrichedList = await Promise.all(list.map(async (project) => {
+            const projectObj = project.toObject();
+            projectObj.runtimeStatuses = {};
+
+            for (const target of project.deploymentTargets || []) {
+                const lastStatusJob = await DeploymentJob.findOne({
+                    projectId: project._id.toString(),
+                    'payload.environment': target.environment,
+                    type: { $in: ['start', 'stop', 'deploy'] },
+                    status: 'SUCCESS'
+                }).sort({ createdAt: -1 });
+
+                console.log(`[List Runtime Status] Project: ${project.name}, Env: ${target.environment}, Last Job:`, lastStatusJob ? { type: lastStatusJob.type, status: lastStatusJob.status, payloadEnv: lastStatusJob.payload?.environment } : 'NONE');
+
+                let runtimeStatus = 'unknown';
+                if (lastStatusJob) {
+                    if (lastStatusJob.type === 'stop') {
+                        runtimeStatus = 'stopped';
+                    } else if (lastStatusJob.type === 'start' || lastStatusJob.type === 'deploy') {
+                        runtimeStatus = 'running';
+                    }
+                }
+                projectObj.runtimeStatuses[target.environment] = runtimeStatus;
+                console.log(`[List Runtime Status] Result: ${runtimeStatus}`);
+            }
+
+            return projectObj;
+        }));
+
+        callback(200, { data: enrichedList });
     } catch (e) {
         callback(500, { error: 'Failed to list projects' });
     }
