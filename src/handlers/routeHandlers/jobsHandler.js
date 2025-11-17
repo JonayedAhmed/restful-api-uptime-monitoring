@@ -5,7 +5,7 @@
 
 const mongoose = require('mongoose');
 const { pushJob } = require('../../lib/agentStreams');
-const { pushJobLog } = require('../../lib/jobLogStreams');
+const { pushJobLog, completeJobStream } = require('../../lib/jobLogStreams');
 const deploymentJobSchema = require('../../schemas/deploymentJobSchema');
 
 const DeploymentJob = new mongoose.model('DeploymentJob', deploymentJobSchema);
@@ -175,6 +175,10 @@ handler._impl.post = async (req, callback) => {
             if (status) update.status = status;
             if (finishedAt) update.finishedAt = finishedAt;
             await DeploymentJob.updateOne({ jobId }, { $set: update });
+            // Send completion event if job finished
+            if (status && (status === 'SUCCESS' || status === 'FAILED')) {
+                completeJobStream(jobId, status);
+            }
             callback(200, { data: 'ok' });
         } else if (action === 'log') {
             const jobId = typeof req?.body?.jobId === 'string' ? req.body.jobId : null;
@@ -186,12 +190,13 @@ handler._impl.post = async (req, callback) => {
                 try { console.log(`[job ${jobId}] [${type}] ${message}`); } catch (_) { }
             }
             // Push to any SSE subscribers for live UI logs
-            pushJobLog(jobId, { type, message, ts: Date.now() });
+            pushJobLog(jobId, { type, message, timestamp: new Date().toISOString() });
             callback(200, { data: 'ok' });
         } else {
             callback(400, { error: 'Unknown action' });
         }
     } catch (e) {
+        console.error('[jobsHandler.post] error:', e);
         callback(500, { error: 'Failed to process job request' });
     }
 };

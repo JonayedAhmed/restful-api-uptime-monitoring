@@ -9,15 +9,30 @@ function registerJobLogStream(jobId, res) {
     });
 }
 
-function pushJobLog(jobId, event) {
+function pushJobLog(jobId, logData) {
     const res = streams.get(jobId);
     if (!res) return false;
     try {
-        res.write(`data: ${JSON.stringify(event)}\n\n`);
+        res.write(`event: log\n`);
+        res.write(`data: ${JSON.stringify(logData)}\n\n`);
         return true;
     } catch (_) {
         return false;
     }
 }
 
-module.exports = { registerJobLogStream, pushJobLog };
+function completeJobStream(jobId, status) {
+    const res = streams.get(jobId);
+    if (!res) return false;
+    try {
+        res.write(`event: complete\n`);
+        res.write(`data: ${JSON.stringify({ status })}\n\n`);
+        res.end();
+        streams.delete(jobId);
+        return true;
+    } catch (_) {
+        return false;
+    }
+}
+
+module.exports = { registerJobLogStream, pushJobLog, completeJobStream };
