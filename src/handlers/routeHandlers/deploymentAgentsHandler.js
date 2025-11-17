@@ -111,17 +111,31 @@ handler._impl.get = async (req, callback) => {
 
             // Get job statistics for this agent
             const totalJobs = await DeploymentJob.countDocuments({ agentId });
-            const successfulJobs = await DeploymentJob.countDocuments({ agentId, status: 'success' });
-            const failedJobs = await DeploymentJob.countDocuments({ agentId, status: 'failed' });
-            const pendingJobs = await DeploymentJob.countDocuments({ agentId, status: 'pending' });
-            const runningJobs = await DeploymentJob.countDocuments({ agentId, status: 'running' });
+            const successfulJobs = await DeploymentJob.countDocuments({ agentId, status: 'SUCCESS' });
+            const failedJobs = await DeploymentJob.countDocuments({ agentId, status: 'FAILED' });
+            const pendingJobs = await DeploymentJob.countDocuments({ agentId, status: { $in: ['QUEUED', 'DISPATCHED'] } });
+            const runningJobs = await DeploymentJob.countDocuments({ agentId, status: 'RUNNING' });
 
             // Get recent job history (last 20 jobs)
             const recentJobs = await DeploymentJob.find({ agentId })
                 .sort({ createdAt: -1 })
                 .limit(20)
-                .populate('projectId', 'name')
                 .lean();
+            
+            // Manually populate project names since projectId is a String, not ObjectId
+            const projectIds = [...new Set(recentJobs.map(j => j.projectId).filter(Boolean))];
+            const projects = await DeploymentProject.find({ _id: { $in: projectIds } }).select('_id name').lean();
+            const projectMap = {};
+            projects.forEach(p => {
+                projectMap[p._id.toString()] = p;
+            });
+            
+            // Attach project info to jobs
+            recentJobs.forEach(job => {
+                if (job.projectId && projectMap[job.projectId]) {
+                    job.projectId = projectMap[job.projectId];
+                }
+            });
 
             // Calculate uptime statistics (last 30 days)
             const thirtyDaysAgo = new Date();
