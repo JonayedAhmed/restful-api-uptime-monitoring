@@ -222,7 +222,7 @@ handler._impl.post = async (req, callback) => {
         // Registration path (control-plane UI)
         const token = typeof headersObject?.token === 'string' ? headersObject.token : false;
         const userId = typeof body?.userId === 'string' ? body.userId : false;
-        
+
         if (!token) return callback(403, { error: 'Auth token required in headers' });
         if (!userId) return callback(403, { error: 'userId required in request body' });
 
@@ -256,10 +256,10 @@ handler._impl.delete = async (req, callback) => {
     try {
         const id = typeof req?.queryStringObject?.id === 'string' ? req.queryStringObject.id : null;
         if (!id) return callback(400, { error: 'id required' });
-        
+
         const agent = await DeploymentAgent.findByIdAndDelete(id);
         if (!agent) return callback(404, { error: 'Agent not found' });
-        
+
         callback(200, { data: { message: 'Agent deleted successfully' } });
     } catch (e) {
         callback(500, { error: 'Failed to delete agent' });

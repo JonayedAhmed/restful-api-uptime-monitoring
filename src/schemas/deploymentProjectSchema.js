@@ -11,6 +11,16 @@ const envVarSchema = new mongoose.Schema({
     secretFlag: { type: Boolean, default: false },
 }, { _id: false });
 
+const dockerVolumeSchema = new mongoose.Schema({
+    host: { type: String, required: true },
+    container: { type: String, required: true },
+}, { _id: false });
+
+const dockerEnvVarSchema = new mongoose.Schema({
+    key: { type: String, required: true },
+    value: { type: String, default: '' },
+}, { _id: false });
+
 const deploymentTargetSchema = new mongoose.Schema({
     agentId: { type: String, default: '' }, // Which agent (server) to deploy to (optional during setup)
     environment: { type: String, enum: ['dev', 'staging', 'production'], required: true },
@@ -21,8 +31,8 @@ const deploymentTargetSchema = new mongoose.Schema({
     port: { type: Number }, // Host port to expose (e.g., 8001)
     containerPort: { type: Number, default: 3000 }, // Internal container port (default 3000)
     // Docker options
-    dockerVolumes: { type: [String], default: [] }, // Volume mounts (e.g., ["/host/path:/container/path"])
-    dockerEnvVars: { type: [String], default: [] }, // Docker-specific env vars
+    dockerVolumes: { type: [dockerVolumeSchema], default: [] }, // Volume mounts with host and container paths
+    dockerEnvVars: { type: [dockerEnvVarSchema], default: [] }, // Docker-specific env vars as key-value pairs
     dockerNetwork: { type: String, default: 'bridge' }, // Docker network mode
 }, { _id: false });
 
