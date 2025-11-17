@@ -13,7 +13,7 @@ const environments = {}
 
 
 environments.staging = {
-    port: Number(process.env.PORT) || 5000,
+    port: Number(process.env.PORT) || 5050,
     envName: 'staging',
     secretKey: 'fsdfsdfsd',
     maxChecks: 50

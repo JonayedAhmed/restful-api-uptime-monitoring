@@ -138,13 +138,23 @@ handler._impl.post = async (req, callback) => {
                     payload = {
                         ...payload,
                         startCommand: runCommands.length > 0 ? runCommands.join(' && ') : '',
-                        workDir: target.deployPath || ''
+                        workDir: target.deployPath || '',
+                        // Docker configuration for service control
+                        useDocker: pipeline?.useDocker || false,
+                        project: project.name || 'project',
+                        environment: target.environment || 'default',
+                        containerName: `${(project.name || 'app').toLowerCase().replace(/[^a-z0-9-]/g, '-')}-${target.environment || 'default'}`
                     };
                 } else if (type === 'stop') {
                     payload = {
                         ...payload,
                         stopCommand: stopCommands.length > 0 ? stopCommands.join(' && ') : '',
-                        workDir: target.deployPath || ''
+                        workDir: target.deployPath || '',
+                        // Docker configuration for service control
+                        useDocker: pipeline?.useDocker || false,
+                        project: project.name || 'project',
+                        environment: target.environment || 'default',
+                        containerName: `${(project.name || 'app').toLowerCase().replace(/[^a-z0-9-]/g, '-')}-${target.environment || 'default'}`
                     };
                 } else if (type === 'restart') {
                     payload = {
@@ -152,7 +162,12 @@ handler._impl.post = async (req, callback) => {
                         restartCommand: stopCommands.length > 0 && runCommands.length > 0
                             ? `${stopCommands.join(' && ')} && ${runCommands.join(' && ')}`
                             : '',
-                        workDir: target.deployPath || ''
+                        workDir: target.deployPath || '',
+                        // Docker configuration for service control
+                        useDocker: pipeline?.useDocker || false,
+                        project: project.name || 'project',
+                        environment: target.environment || 'default',
+                        containerName: `${(project.name || 'app').toLowerCase().replace(/[^a-z0-9-]/g, '-')}-${target.environment || 'default'}`
                     };
                 }
             }
