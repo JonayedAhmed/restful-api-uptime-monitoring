@@ -24,10 +24,11 @@ handler.jobsHandler = (req, callback) => {
 handler._impl = {};
 
 // GET: list jobs with filters
-// Query params: projectId, environment, status, agentId, type, limit, skip
+// Query params: jobId, projectId, environment, status, agentId, type, limit, skip
 handler._impl.get = async (req, callback) => {
     try {
         const { queryStringObject } = req;
+        const jobId = typeof queryStringObject?.jobId === 'string' ? queryStringObject.jobId : null;
         const projectId = typeof queryStringObject?.projectId === 'string' ? queryStringObject.projectId : null;
         const environment = typeof queryStringObject?.environment === 'string' ? queryStringObject.environment : null;
         const status = typeof queryStringObject?.status === 'string' ? queryStringObject.status : null;
@@ -37,6 +38,7 @@ handler._impl.get = async (req, callback) => {
         const skip = parseInt(queryStringObject?.skip) || 0;
 
         const filter = {};
+        if (jobId) filter.jobId = jobId;
         if (projectId) filter.projectId = projectId;
         if (environment) filter['payload.environment'] = environment;
         if (status) filter.status = status;
