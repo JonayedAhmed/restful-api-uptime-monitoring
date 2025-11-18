@@ -5,9 +5,8 @@
  * Date: 01/01/2024
  */
 
-
 // dependencies
-const server = require('./src/lib/server');
+const server = require('./src/lib/server-express');
 const workers = require('./src/lib/worker');
 
 // app object - module scaffolding
