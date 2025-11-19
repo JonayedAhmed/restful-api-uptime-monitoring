@@ -70,12 +70,17 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // MongoDB query sanitization - prevents NoSQL injection
-app.use(mongoSanitize({
-    replaceWith: '_',
-    onSanitize: ({ req, key }) => {
-        console.warn(`[Security] Sanitized request from ${req.ip}: ${key}`);
+// Only sanitize req.body, req.params (not req.query due to Express 5 compatibility)
+app.use((req, res, next) => {
+    if (req.body) {
+        req.body = mongoSanitize.sanitize(req.body, { replaceWith: '_' });
     }
-}));
+    if (req.params) {
+        req.params = mongoSanitize.sanitize(req.params, { replaceWith: '_' });
+    }
+    // Skip req.query sanitization to avoid Express 5 read-only property error
+    next();
+});
 
 // Request logging middleware (development)
 if (process.env.NODE_ENV !== 'production') {
