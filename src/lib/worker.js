@@ -39,10 +39,10 @@ const worker = {};
 
 // Create a transporter
 const transporter = nodemailer.createTransport({
-    service: 'gmail',
+    service: process.env.EMAIL_SERVICE || 'gmail',
     auth: {
-        user: 'alerts.sys.monitor@gmail.com',
-        pass: 'bqzy sefd mdsm wlgq' // Use your app password here
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASSWORD
     }
 });
 

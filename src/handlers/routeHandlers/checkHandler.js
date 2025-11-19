@@ -53,6 +53,14 @@ handler._check.post = async (requestProperties, callback) => {
             return callback(403, { error: 'Authentication failed.' });
         }
 
+        // Verify token expiration
+        const tokenExpiry = parseInt(tokenData[0].expires);
+        const currentTime = Date.now();
+        
+        if (tokenExpiry < currentTime) {
+            return callback(403, { error: 'Token has expired. Please log in again.' });
+        }
+
         const userId = tokenData?.[0]?.userId;
 
         let userData = await User.find({ userId: userId });
@@ -62,8 +70,6 @@ handler._check.post = async (requestProperties, callback) => {
                 error: 'User not found.'
             });
         }
-
-        // @TODO: Need to verify token
 
         let userChecks = typeof (userData[0].checks) === 'object' && Array.isArray(userData[0].checks)
             ? userData[0].checks : [];

@@ -5,6 +5,8 @@
  * Date: 01/10/2024
  */
 
+// Load environment variables from .env file
+require('dotenv').config();
 
 // dependencies
 
@@ -15,14 +17,14 @@ const environments = {}
 environments.staging = {
     port: Number(process.env.PORT) || 5050,
     envName: 'staging',
-    secretKey: 'fsdfsdfsd',
+    secretKey: process.env.SECRET_KEY || 'fallback-insecure-key',
     maxChecks: 50
 }
 
 environments.production = {
     port: Number(process.env.PORT) || 3000,
     envName: 'production',
-    secretKey: 'fsdfsdfsd',
+    secretKey: process.env.SECRET_KEY || 'fallback-insecure-key',
     maxChecks: 50
 }
 

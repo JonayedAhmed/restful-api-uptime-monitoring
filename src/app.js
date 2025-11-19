@@ -5,16 +5,58 @@
  * Date: 11/18/2025
  */
 
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
+const mongoSanitize = require('express-mongo-sanitize');
 const routes = require('./routes-express');
 
 // Create Express app
 const app = express();
 
-// Security middleware
-app.use(helmet());
+// Enhanced helmet security configuration
+app.use(helmet({
+    contentSecurityPolicy: {
+        directives: {
+            defaultSrc: ["'self'"],
+            styleSrc: ["'self'", "'unsafe-inline'"],
+            scriptSrc: ["'self'"],
+            imgSrc: ["'self'", 'data:', 'https:'],
+        },
+    },
+    hsts: {
+        maxAge: 31536000,
+        includeSubDomains: true,
+        preload: true
+    },
+    referrerPolicy: { policy: 'strict-origin-when-cross-origin' }
+}));
+
+// Rate limiting configuration
+const limiter = rateLimit({
+    windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes default
+    max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100, // limit each IP to 100 requests per windowMs
+    message: 'Too many requests from this IP, please try again later.',
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
+// Stricter rate limiting for authentication endpoints
+const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 5, // limit each IP to 5 requests per windowMs
+    message: 'Too many authentication attempts, please try again later.',
+    skipSuccessfulRequests: true,
+});
+
+// Apply rate limiting to all routes
+app.use(limiter);
+
+// Apply stricter rate limiting to auth routes
+app.use('/user', authLimiter);
+app.use('/token', authLimiter);
 
 // CORS middleware - allow all origins for development
 app.use(cors({
@@ -26,6 +68,14 @@ app.use(cors({
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// MongoDB query sanitization - prevents NoSQL injection
+app.use(mongoSanitize({
+    replaceWith: '_',
+    onSanitize: ({ req, key }) => {
+        console.warn(`[Security] Sanitized request from ${req.ip}: ${key}`);
+    }
+}));
 
 // Request logging middleware (development)
 if (process.env.NODE_ENV !== 'production') {
