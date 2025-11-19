@@ -104,7 +104,18 @@ const checkSchema = mongoose.Schema({
     sslExpiryAlerts: { type: Boolean, default: false },
     sslAlertThresholdsSent: { type: [Number], default: [] }, // days thresholds already alerted
     sslLastCertExpiryAt: { type: Number }, // millis since epoch
-    sslLastCheckedAt: { type: Number }
+    sslLastCheckedAt: { type: Number },
+    // Enhanced SSL certificate details
+    sslCertDetails: {
+        type: Object,
+        default: null
+        // Contains: subject, issuer, validFrom, validTo, serialNumber, 
+        // fingerprint, fingerprint256, subjectaltname, chain[]
+    },
+    sslChainValid: { type: Boolean }, // Whether certificate chain is properly validated
+    sslChainLength: { type: Number }, // Number of certificates in chain (including root CA)
+    sslAutoRenewalEnabled: { type: Boolean, default: false }, // Track auto-renewal alerts
+    sslLastRenewalDetectedAt: { type: Number } // When certificate was last renewed (fingerprint change)
 });
 
 module.exports = checkSchema;

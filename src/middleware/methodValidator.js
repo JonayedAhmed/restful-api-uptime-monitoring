@@ -19,21 +19,29 @@ const validateForMethod = (method, validators) => {
             return next();
         }
 
-        // Run all validators
-        for (const validator of validators) {
-            await validator.run(req);
-        }
+        // Run all validators sequentially
+        try {
+            for (const validator of validators) {
+                // Express-validator middleware functions return promises when called
+                await validator(req, res, () => {});
+            }
 
-        // Check for validation errors
-        const errors = validationResult(req);
-        if (!errors.isEmpty()) {
-            return res.status(400).json({
-                error: 'Validation failed',
-                details: errors.array()
-            });
-        }
+            // Check for validation errors
+            const errors = validationResult(req);
+            if (!errors.isEmpty()) {
+                // Send error response and stop here - don't call next()
+                return res.status(400).json({
+                    error: 'Validation failed',
+                    details: errors.array()
+                });
+            }
 
-        next();
+            // Validation passed, continue to next middleware
+            next();
+        } catch (error) {
+            // If there's an error during validation, pass it to error handler
+            next(error);
+        }
     };
 };
 

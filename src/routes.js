@@ -21,11 +21,15 @@ const { agentStreamHandler } = require('./handlers/routeHandlers/agentStreamHand
 const { jobsHandler } = require('./handlers/routeHandlers/jobsHandler');
 const { agentCodeHandler } = require('./handlers/routeHandlers/agentCodeHandler');
 const { jobLogStreamHandler } = require('./handlers/routeHandlers/jobLogStreamHandler');
+const { checkUpdateStreamHandler } = require('./handlers/routeHandlers/checkUpdateStreamHandler');
 
 const routes = {
     user: userHandler,
     token: tokenHandler,
     check: checkHandler,
+    'check/ssl': (req, cb) => checkHandler._check.sslDetails(req, cb),
+    'check/ssl-renewal': (req, cb) => checkHandler._check.sslRenewal(req, cb),
+    'checks/stream': checkUpdateStreamHandler,
     health: healthHandler,
     settings: settingsHandler,
     metrics: metricsHandler,

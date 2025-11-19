@@ -11,7 +11,8 @@ const router = express.Router();
 // Import handlers
 const { userHandler } = require('./handlers/routeHandlers/userHandler');
 const { tokenHandler } = require('./handlers/routeHandlers/tokenHandler');
-const { checkHandler } = require('./handlers/routeHandlers/checkHandler');
+const checkHandlerModule = require('./handlers/routeHandlers/checkHandler');
+const checkHandler = checkHandlerModule.checkHandler;
 const { healthHandler } = require('./handlers/routeHandlers/healthHandler');
 const { settingsHandler } = require('./handlers/routeHandlers/settingsHandler');
 const { metricsHandler } = require('./handlers/routeHandlers/metricsHandler');
@@ -23,6 +24,7 @@ const { agentStreamHandler } = require('./handlers/routeHandlers/agentStreamHand
 const { jobsHandler } = require('./handlers/routeHandlers/jobsHandler');
 const { agentCodeHandler } = require('./handlers/routeHandlers/agentCodeHandler');
 const { jobLogStreamHandler } = require('./handlers/routeHandlers/jobLogStreamHandler');
+const { checkUpdateStreamHandler } = require('./handlers/routeHandlers/checkUpdateStreamHandler');
 
 // Import validators
 const {
@@ -122,5 +124,15 @@ router.all('/agentStream', wrapHandler(agentStreamHandler));
 router.all('/jobs', wrapHandler(jobsHandler));
 router.all('/agentCode', wrapHandler(agentCodeHandler));
 router.all('/jobs/stream', wrapHandler(jobLogStreamHandler));
+router.all('/checks/stream', wrapHandler(checkUpdateStreamHandler));
+
+// SSL endpoints
+router.get('/check/ssl', wrapHandler((requestProperties, callback) => {
+    checkHandlerModule._check.sslDetails(requestProperties, callback);
+}));
+
+router.put('/check/ssl-renewal', wrapHandler((requestProperties, callback) => {
+    checkHandlerModule._check.sslRenewal(requestProperties, callback);
+}));
 
 module.exports = router;

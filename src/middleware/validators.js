@@ -131,10 +131,12 @@ const validateCheckCreation = [
 ];
 
 /**
- * Agent Registration Validation
+ * Agent Registration Validation (for UI registration only, not agent handshake)
  */
 const validateAgentRegistration = [
+    // Only validate if this is a registration request (has userId), not agent handshake/heartbeat
     body('name')
+        .if(body('userId').exists())
         .trim()
         .notEmpty().withMessage('Agent name is required')
         .isLength({ min: 3, max: 100 }).withMessage('Agent name must be 3-100 characters')

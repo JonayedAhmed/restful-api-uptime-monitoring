@@ -505,4 +505,131 @@ handler._check.delete = async (requestProperties, callback) => {
     }
 }
 
+// SSL Certificate Details endpoint
+handler._check.sslDetails = async (requestProperties, callback) => {
+    try {
+        const token = typeof (requestProperties.headersObject.token) === 'string'
+            ? requestProperties.headersObject.token : false;
+
+        if (!token) {
+            return callback(403, { error: 'Authentication Failed.' });
+        }
+
+        const tokenData = await Token.find({ token: token });
+        
+        if (tokenData.length === 0) {
+            return callback(403, { error: 'Authentication Failed.' });
+        }
+
+        // Check token expiration
+        const tokenExpiry = typeof tokenData[0].expires === 'string' 
+            ? parseInt(tokenData[0].expires, 10) 
+            : tokenData[0].expires;
+        const currentTime = Date.now();
+
+        if (tokenExpiry < currentTime) {
+            return callback(403, { error: 'Token has expired. Please login again.' });
+        }
+
+        const checkId = requestProperties.queryStringObject.id;
+        
+        if (!checkId) {
+            return callback(400, { error: 'Check ID is required' });
+        }
+
+        const check = await Check.findById(checkId);
+        
+        if (!check) {
+            return callback(404, { error: 'Check not found' });
+        }
+
+        // Verify ownership
+        if (check.userId !== tokenData[0].userId) {
+            return callback(403, { error: 'Access denied' });
+        }
+
+        // Return SSL certificate details
+        const sslInfo = {
+            sslExpiryAlerts: check.sslExpiryAlerts,
+            sslLastCertExpiryAt: check.sslLastCertExpiryAt,
+            sslLastCheckedAt: check.sslLastCheckedAt,
+            sslCertDetails: check.sslCertDetails,
+            sslChainValid: check.sslChainValid,
+            sslChainLength: check.sslChainLength,
+            sslAutoRenewalEnabled: check.sslAutoRenewalEnabled,
+            sslLastRenewalDetectedAt: check.sslLastRenewalDetectedAt,
+            sslAlertThresholdsSent: check.sslAlertThresholdsSent
+        };
+
+        callback(200, sslInfo);
+
+    } catch (err) {
+        console.error('SSL details error:', err);
+        callback(500, { error: 'Internal server error' });
+    }
+};
+
+// SSL Auto-Renewal Configuration endpoint
+handler._check.sslRenewal = async (requestProperties, callback) => {
+    try {
+        const token = typeof (requestProperties.headersObject.token) === 'string'
+            ? requestProperties.headersObject.token : false;
+
+        if (!token) {
+            return callback(403, { error: 'Authentication Failed.' });
+        }
+
+        const tokenData = await Token.find({ token: token });
+        
+        if (tokenData.length === 0) {
+            return callback(403, { error: 'Authentication Failed.' });
+        }
+
+        // Check token expiration
+        const tokenExpiry = typeof tokenData[0].expires === 'string' 
+            ? parseInt(tokenData[0].expires, 10) 
+            : tokenData[0].expires;
+        const currentTime = Date.now();
+
+        if (tokenExpiry < currentTime) {
+            return callback(403, { error: 'Token has expired. Please login again.' });
+        }
+
+        const checkId = requestProperties.queryStringObject.id;
+        const enabled = typeof requestProperties.body.enabled === 'boolean' 
+            ? requestProperties.body.enabled 
+            : false;
+        
+        if (!checkId) {
+            return callback(400, { error: 'Check ID is required' });
+        }
+
+        const check = await Check.findById(checkId);
+        
+        if (!check) {
+            return callback(404, { error: 'Check not found' });
+        }
+
+        // Verify ownership
+        if (check.userId !== tokenData[0].userId) {
+            return callback(403, { error: 'Access denied' });
+        }
+
+        // Update auto-renewal setting
+        await Check.updateOne(
+            { _id: checkId },
+            { $set: { sslAutoRenewalEnabled: enabled } }
+        );
+
+        callback(200, { 
+            message: 'SSL auto-renewal alert setting updated',
+            sslAutoRenewalEnabled: enabled 
+        });
+
+    } catch (err) {
+        console.error('SSL renewal config error:', err);
+        callback(500, { error: 'Internal server error' });
+    }
+};
+
 module.exports = handler;

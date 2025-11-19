@@ -359,6 +359,26 @@ worker.processCheckOutcome = async (checkData, checkOutcome) => {
     Check.updateOne({ _id: newCheckData._id }, {
         $set: newCheckData
     }).then((response) => {
+        // Broadcast real-time update to connected clients
+        try {
+            const { broadcastCheckUpdate } = require('./checkUpdateStreams');
+            broadcastCheckUpdate(newCheckData.userId, {
+                checkId: newCheckData._id.toString(),
+                state,
+                responseTime,
+                lastChecked: newCheckData.lastChecked,
+                isActive: newCheckData.isActive,
+                url: newCheckData.url,
+                protocol: newCheckData.protocol,
+                serviceName: newCheckData.serviceName,
+                group: newCheckData.group,
+                failureStreak,
+                successStreak,
+                sslLastCertExpiryAt: newCheckData.sslLastCertExpiryAt,
+                sslChainValid: newCheckData.sslChainValid
+            });
+        } catch (_) { }
+        
         // store health log
         try {
             // ensure TTL index for current user's preference (best-effort, throttled)
@@ -513,7 +533,7 @@ worker.gatherAllChecks = async () => {
     if (typeof (checks) === 'object' && Array.isArray(checks) && checks?.length > 0) {
         // Print a single line indicating when this batch was executed
         try {
-            console.log(`[Checks] Executed at ${new Date().toISOString()} (count=${checks.length})`);
+            // console.log(`[Checks] Executed at ${new Date().toISOString()} (count=${checks.length})`);
         } catch (_) { }
         metrics.lastRunAt = Date.now();
         metrics.queueLength = checks.length;
@@ -559,7 +579,7 @@ worker.init = () => {
 worker.metrics = metrics;
 module.exports = worker;
 
-// SSL expiry checker with threshold alerts
+// SSL expiry checker with threshold alerts and certificate chain validation
 function getDaysUntil(date) {
     const ms = date.getTime() - Date.now();
     return Math.floor(ms / (1000 * 60 * 60 * 24));
@@ -570,11 +590,57 @@ worker.checkSslExpiry = async (hostname, checkData) => {
         const tls = require('tls');
         const socket = tls.connect(443, hostname, { servername: hostname, rejectUnauthorized: false }, async () => {
             try {
-                const cert = socket.getPeerCertificate();
+                const cert = socket.getPeerCertificate(true); // true = include certificate chain
                 socket.end();
                 if (!cert || !cert.valid_to) return resolve();
+                
                 const expiry = new Date(cert.valid_to);
                 const daysLeft = getDaysUntil(expiry);
+                
+                // Extract detailed certificate information
+                const certDetails = {
+                    subject: cert.subject,
+                    issuer: cert.issuer,
+                    validFrom: cert.valid_from,
+                    validTo: cert.valid_to,
+                    serialNumber: cert.serialNumber,
+                    fingerprint: cert.fingerprint,
+                    fingerprint256: cert.fingerprint256,
+                    subjectaltname: cert.subjectaltname,
+                    // Certificate chain validation
+                    chain: []
+                };
+                
+                // Build certificate chain
+                let currentCert = cert;
+                let chainDepth = 0;
+                while (currentCert && chainDepth < 10) { // Limit depth to prevent infinite loops
+                    certDetails.chain.push({
+                        subject: currentCert.subject?.CN || currentCert.subject?.O || 'Unknown',
+                        issuer: currentCert.issuer?.CN || currentCert.issuer?.O || 'Unknown',
+                        validFrom: currentCert.valid_from,
+                        validTo: currentCert.valid_to,
+                        fingerprint: currentCert.fingerprint,
+                        isSelfSigned: currentCert.subject?.CN === currentCert.issuer?.CN
+                    });
+                    
+                    if (currentCert.issuerCertificate && currentCert.issuerCertificate !== currentCert) {
+                        currentCert = currentCert.issuerCertificate;
+                        chainDepth++;
+                    } else {
+                        break;
+                    }
+                }
+                
+                // Validate certificate chain
+                const chainValid = certDetails.chain.length > 0 && 
+                                   certDetails.chain[certDetails.chain.length - 1].isSelfSigned; // Root CA should be self-signed
+                
+                // Detect certificate renewal (fingerprint change)
+                const previousFingerprint = checkData.sslCertDetails?.fingerprint256 || checkData.sslCertDetails?.fingerprint;
+                const currentFingerprint = certDetails.fingerprint256 || certDetails.fingerprint;
+                const certificateRenewed = previousFingerprint && currentFingerprint && previousFingerprint !== currentFingerprint;
+                
                 // Fetch user-configured thresholds from Settings (default: [30,14,7,3,1])
                 let thresholds = [30, 14, 7, 3, 1];
                 try {
@@ -583,19 +649,68 @@ worker.checkSslExpiry = async (hostname, checkData) => {
                         thresholds = s.sslThresholdDays.filter(n => Number.isFinite(n) && n > 0).sort((a, b) => a - b);
                     }
                 } catch (_) { }
-                const sent = Array.isArray(checkData.sslAlertThresholdsSent) ? checkData.sslAlertThresholdsSent : [];
+                
+                let sent = Array.isArray(checkData.sslAlertThresholdsSent) ? checkData.sslAlertThresholdsSent : [];
+                
+                // Reset alert thresholds on certificate renewal
+                if (certificateRenewed) {
+                    sent = [];
+                }
+                
                 const toSend = thresholds.filter(d => daysLeft <= d && !sent.includes(d));
                 const inSnooze = typeof checkData.snoozeUntil === 'number' && Date.now() < checkData.snoozeUntil;
+                
+                // Update check with detailed SSL info
+                const sslUpdate = {
+                    sslLastCertExpiryAt: expiry.getTime(),
+                    sslLastCheckedAt: Date.now(),
+                    sslCertDetails: certDetails,
+                    sslChainValid: chainValid,
+                    sslChainLength: certDetails.chain.length
+                };
+                
+                // Handle certificate renewal
+                if (certificateRenewed) {
+                    sslUpdate.sslLastRenewalDetectedAt = Date.now();
+                    sslUpdate.sslAlertThresholdsSent = [];
+                    
+                    // Send renewal notification if enabled
+                    if (checkData.sslAutoRenewalEnabled && !inSnooze) {
+                        try {
+                            worker.alertUserToStatusChange({
+                                ...checkData,
+                                protocol: 'https',
+                                url: hostname,
+                                sslDaysLeft: daysLeft,
+                                sslIssuer: cert.issuer?.O || cert.issuer?.CN || 'Unknown',
+                                sslChainValid: chainValid,
+                                certificateRenewed: true
+                            }, `SSL Certificate Renewed`);
+                        } catch (_) { }
+                    }
+                }
+                
                 if (toSend.length > 0 && !inSnooze) {
                     // Send a single alert mentioning the nearest pending threshold
                     const target = Math.min(...toSend);
-                    try { worker.alertUserToStatusChange({ ...checkData, protocol: 'https', url: hostname }, `SSL Expiry`); } catch (_) { }
+                    try { 
+                        worker.alertUserToStatusChange({ 
+                            ...checkData, 
+                            protocol: 'https', 
+                            url: hostname,
+                            sslDaysLeft: daysLeft,
+                            sslIssuer: cert.issuer?.O || cert.issuer?.CN || 'Unknown',
+                            sslChainValid: chainValid
+                        }, `SSL Expiry`); 
+                    } catch (_) { }
                     const newSent = [...new Set([...sent, target])];
-                    await Check.updateOne({ _id: checkData._id }, { $set: { sslAlertThresholdsSent: newSent, sslLastCertExpiryAt: expiry.getTime(), sslLastCheckedAt: Date.now() } });
-                } else {
-                    await Check.updateOne({ _id: checkData._id }, { $set: { sslLastCertExpiryAt: expiry.getTime(), sslLastCheckedAt: Date.now() } });
+                    sslUpdate.sslAlertThresholdsSent = newSent;
                 }
-            } catch (_) {
+                
+                await Check.updateOne({ _id: checkData._id }, { $set: sslUpdate });
+                
+            } catch (err) {
+                console.error('SSL check error:', err.message);
                 resolve();
             }
             resolve();

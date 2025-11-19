@@ -85,7 +85,7 @@ app.use((req, res, next) => {
 // Request logging middleware (development)
 if (process.env.NODE_ENV !== 'production') {
     app.use((req, res, next) => {
-        console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+        // console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
         next();
     });
 }
