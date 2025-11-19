@@ -17,15 +17,18 @@ const routes = require('./routes-express');
 const app = express();
 
 // Enhanced helmet security configuration
+// Disable CSP in development to prevent CORS issues
 app.use(helmet({
-    contentSecurityPolicy: {
+    contentSecurityPolicy: process.env.NODE_ENV === 'production' ? {
         directives: {
             defaultSrc: ["'self'"],
             styleSrc: ["'self'", "'unsafe-inline'"],
             scriptSrc: ["'self'"],
             imgSrc: ["'self'", 'data:', 'https:'],
         },
-    },
+    } : false,
+    crossOriginResourcePolicy: false,
+    crossOriginEmbedderPolicy: false,
     hsts: {
         maxAge: 31536000,
         includeSubDomains: true,
@@ -58,11 +61,41 @@ app.use(limiter);
 app.use('/user', authLimiter);
 app.use('/token', authLimiter);
 
-// CORS middleware - allow all origins for development
+// CORS middleware - configured for development with frontend on localhost:5173
 app.use(cors({
-    origin: '*',
+    origin: (origin, callback) => {
+        // Allow requests with no origin (like mobile apps, Postman, or same-origin)
+        if (!origin) return callback(null, true);
+        
+        // Allow localhost origins for development
+        const allowedOrigins = [
+            'http://localhost:5173',
+            'http://localhost:3000',
+            'http://127.0.0.1:5173',
+            'http://127.0.0.1:3000'
+        ];
+        
+        if (process.env.NODE_ENV === 'production') {
+            // In production, only allow your production domain
+            // Add your production domain here
+            const prodOrigin = process.env.FRONTEND_URL;
+            if (prodOrigin && origin === prodOrigin) {
+                return callback(null, true);
+            }
+        } else {
+            // In development, allow all localhost origins
+            if (allowedOrigins.includes(origin) || origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')) {
+                return callback(null, true);
+            }
+        }
+        
+        callback(null, true); // Allow in development
+    },
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'token']
+    allowedHeaders: ['Content-Type', 'Authorization', 'token', 'Cache-Control'],
+    credentials: true,
+    preflightContinue: false,
+    optionsSuccessStatus: 204
 }));
 
 // Body parsing middleware

@@ -49,24 +49,102 @@ handler._impl.get = async (req, callback) => {
                 .limit(20)
                 .lean();
 
-            // Get deployment statistics per environment
+            // Optimize: Get all agent IDs at once
+            const agentIds = project.deploymentTargets
+                .filter(t => t.agentId)
+                .map(t => t.agentId);
+            const agents = agentIds.length > 0 
+                ? await DeploymentAgent.find({ _id: { $in: agentIds } }).select('name hostType status lastCheckIn').lean()
+                : [];
+            const agentMap = agents.reduce((acc, agent) => {
+                acc[agent._id.toString()] = agent;
+                return acc;
+            }, {});
+
+            // Optimize: Get deployment stats for all environments in one aggregation
+            const statsAggregation = await DeploymentJob.aggregate([
+                {
+                    $match: { 
+                        projectId,
+                        'payload.environment': { $in: project.deploymentTargets.map(t => t.environment) }
+                    }
+                },
+                {
+                    $facet: {
+                        deployStats: [
+                            {
+                                $match: { type: 'deploy' }
+                            },
+                            {
+                                $group: {
+                                    _id: '$payload.environment',
+                                    total: { $sum: 1 },
+                                    successful: {
+                                        $sum: { $cond: [{ $eq: ['$status', 'SUCCESS'] }, 1, 0] }
+                                    },
+                                    failed: {
+                                        $sum: { $cond: [{ $eq: ['$status', 'FAILED'] }, 1, 0] }
+                                    }
+                                }
+                            }
+                        ],
+                        lastDeployments: [
+                            {
+                                $match: { type: 'deploy' }
+                            },
+                            {
+                                $sort: { createdAt: -1 }
+                            },
+                            {
+                                $group: {
+                                    _id: '$payload.environment',
+                                    lastJob: { $first: '$$ROOT' }
+                                }
+                            }
+                        ],
+                        runtimeStatus: [
+                            {
+                                $match: { 
+                                    type: { $in: ['start', 'stop', 'deploy'] },
+                                    status: 'SUCCESS'
+                                }
+                            },
+                            {
+                                $sort: { createdAt: -1 }
+                            },
+                            {
+                                $group: {
+                                    _id: '$payload.environment',
+                                    lastJob: { $first: '$$ROOT' }
+                                }
+                            }
+                        ]
+                    }
+                }
+            ]);
+
+            const deployStatsMap = statsAggregation[0].deployStats.reduce((acc, stat) => {
+                acc[stat._id] = stat;
+                return acc;
+            }, {});
+
+            const lastDeploymentsMap = statsAggregation[0].lastDeployments.reduce((acc, item) => {
+                acc[item._id] = item.lastJob;
+                return acc;
+            }, {});
+
+            const runtimeStatusMap = statsAggregation[0].runtimeStatus.reduce((acc, item) => {
+                acc[item._id] = item.lastJob;
+                return acc;
+            }, {});
+
+            // Build stats object
             const stats = {};
             for (const target of project.deploymentTargets || []) {
                 const env = target.environment;
-                const totalDeployments = await DeploymentJob.countDocuments({ projectId, 'payload.environment': env, type: 'deploy' });
-                const successfulDeployments = await DeploymentJob.countDocuments({ projectId, 'payload.environment': env, type: 'deploy', status: 'SUCCESS' });
-                const failedDeployments = await DeploymentJob.countDocuments({ projectId, 'payload.environment': env, type: 'deploy', status: 'FAILED' });
-                const lastDeployment = await DeploymentJob.findOne({ projectId, 'payload.environment': env, type: 'deploy' }).sort({ createdAt: -1 });
-
-                // Get current runtime status (check last start/stop/deploy job)
-                const lastStatusJob = await DeploymentJob.findOne({
-                    projectId,
-                    'payload.environment': env,
-                    type: { $in: ['start', 'stop', 'deploy'] },
-                    status: 'SUCCESS'
-                }).sort({ createdAt: -1 });
-
-                console.log(`[Runtime Status] Project: ${projectId}, Env: ${env}, Last Job:`, lastStatusJob ? { type: lastStatusJob.type, status: lastStatusJob.status, payloadEnv: lastStatusJob.payload?.environment, createdAt: lastStatusJob.createdAt } : 'NONE');
+                const deployStats = deployStatsMap[env] || { total: 0, successful: 0, failed: 0 };
+                const lastDeployment = lastDeploymentsMap[env];
+                const lastStatusJob = runtimeStatusMap[env];
 
                 let runtimeStatus = 'unknown';
                 if (lastStatusJob) {
@@ -77,19 +155,13 @@ handler._impl.get = async (req, callback) => {
                     }
                 }
 
-                console.log(`[Runtime Status] Result: ${runtimeStatus}`);
-
-                // Get agent details
-                let agent = null;
-                if (target.agentId) {
-                    agent = await DeploymentAgent.findById(target.agentId).select('name hostType status lastCheckIn');
-                }
-
                 stats[env] = {
-                    totalDeployments,
-                    successfulDeployments,
-                    failedDeployments,
-                    successRate: totalDeployments > 0 ? ((successfulDeployments / totalDeployments) * 100).toFixed(1) : '0.0',
+                    totalDeployments: deployStats.total,
+                    successfulDeployments: deployStats.successful,
+                    failedDeployments: deployStats.failed,
+                    successRate: deployStats.total > 0 
+                        ? ((deployStats.successful / deployStats.total) * 100).toFixed(1) 
+                        : '0.0',
                     runtimeStatus,
                     lastDeployment: lastDeployment ? {
                         status: lastDeployment.status,
@@ -99,7 +171,7 @@ handler._impl.get = async (req, callback) => {
                             ? Math.round((new Date(lastDeployment.finishedAt) - new Date(lastDeployment.startedAt)) / 1000)
                             : null
                     } : null,
-                    agent
+                    agent: target.agentId ? agentMap[target.agentId.toString()] : null
                 };
             }
 
