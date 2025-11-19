@@ -4,6 +4,7 @@ const checkSchema = mongoose.Schema({
     userId: {
         type: String,
         required: true,
+        index: true // Index for faster user check lookups
     },
     group: {
         type: String,
@@ -61,12 +62,19 @@ const checkSchema = mongoose.Schema({
             message: 'Timeout seconds must be between 1 and 10.'
         }
     },
-    lastChecked: Number,
-    state: String,
+    lastChecked: {
+        type: Number,
+        index: true // Index for worker queries to find checks due for execution
+    },
+    state: {
+        type: String,
+        index: true // Index for filtering by UP/DOWN state
+    },
     isActive: {
         type: Boolean,
         required: true,
-        enum: [true, false]
+        enum: [true, false],
+        index: true // Index for worker to query only active checks
     },
     responseTime: Number,
     serviceName: {

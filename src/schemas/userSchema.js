@@ -11,11 +11,14 @@ const userSchema = mongoose.Schema({
     },
     userId: {
         type: String,
-        required: true
+        required: true,
+        index: true // Index for faster user lookups
     },
     email: {
         type: String,
-        required: true
+        required: true,
+        unique: true, // Unique index for login queries and preventing duplicates
+        index: true
     },
     additionalEmails: Array,
     phone: String,

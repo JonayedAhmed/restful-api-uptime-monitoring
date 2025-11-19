@@ -24,6 +24,17 @@ const { jobsHandler } = require('./handlers/routeHandlers/jobsHandler');
 const { agentCodeHandler } = require('./handlers/routeHandlers/agentCodeHandler');
 const { jobLogStreamHandler } = require('./handlers/routeHandlers/jobLogStreamHandler');
 
+// Import validators
+const {
+    validateUserRegistration,
+    validateUserLogin,
+    validateCheckCreation,
+    validateAgentRegistration,
+    validateDeploymentProject
+} = require('./middleware/validators');
+
+const { validateForMethod } = require('./middleware/methodValidator');
+
 // Helper to wrap old callback-based handlers for Express
 const wrapHandler = (handler) => {
     return async (req, res, next) => {
@@ -73,18 +84,40 @@ const wrapHandler = (handler) => {
     };
 };
 
-// Define routes
-router.all('/user', wrapHandler(userHandler));
-router.all('/token', wrapHandler(tokenHandler));
-router.all('/check', wrapHandler(checkHandler));
+// Define routes with validation
+router.all('/user', 
+    validateForMethod('POST', validateUserRegistration),
+    wrapHandler(userHandler)
+);
+
+router.all('/token',
+    validateForMethod('POST', validateUserLogin),
+    wrapHandler(tokenHandler)
+);
+
+router.all('/check',
+    validateForMethod('POST', validateCheckCreation),
+    wrapHandler(checkHandler)
+);
+
 router.all('/health', wrapHandler(healthHandler));
 router.all('/settings', wrapHandler(settingsHandler));
 router.all('/metrics', wrapHandler(metricsHandler));
 router.all('/deployments', wrapHandler(deploymentsHandler));
 router.all('/terminal', wrapHandler(deploymentsHandler));
 router.all('/pipelines', wrapHandler(pipelineTemplatesHandler));
-router.all('/deploymentProjects', wrapHandler(deploymentProjectsHandler));
-router.all('/deploymentAgents', wrapHandler(deploymentAgentsHandler));
+
+router.all('/deploymentProjects',
+    validateForMethod('POST', validateDeploymentProject),
+    validateForMethod('PUT', validateDeploymentProject),
+    wrapHandler(deploymentProjectsHandler)
+);
+
+router.all('/deploymentAgents',
+    validateForMethod('POST', validateAgentRegistration),
+    wrapHandler(deploymentAgentsHandler)
+);
+
 router.all('/agentStream', wrapHandler(agentStreamHandler));
 router.all('/jobs', wrapHandler(jobsHandler));
 router.all('/agentCode', wrapHandler(agentCodeHandler));
